@@ -495,7 +495,7 @@ function renderVisao(){
     endMap[k].count++;
     endMap[k].taxa=e.taxa||endMap[k].taxa;
   }));
-  const topEnd=Object.values(endMap).sort((a,b)=>b.count-a.count).slice(0,8);
+  const topEnd=Object.values(endMap).sort((a,b)=>b.count-a.count).slice(0,10);
   const maxCount=topEnd[0]?.count||1;
 
   // Últimos 14 dias pro gráfico
@@ -543,7 +543,9 @@ function renderVisao(){
     <div class="grid3">
       <div class="card">
         <div class="card-title">Entregas por dia <span>Últimos 14 dias</span></div>
-        <div class="chart-wrap"><canvas id="chartDia"></canvas></div>
+        <div style="position:relative;height:180px;">
+          <canvas id="chartDia"></canvas>
+        </div>
       </div>
       <div class="card">
         <div class="card-title">Entregadores hoje</div>
@@ -581,14 +583,25 @@ function renderVisao(){
     </div>
 
     <div class="card">
-      <div class="card-title">Top endereços mais pedidos <span>no período</span></div>
+      <div class="card-title">Top 10 endereços mais pedidos <span>no período</span></div>
       ${topEnd.map((e,i)=>`
-        <div class="end-row">
-          <div class="end-rank">${i+1}</div>
-          <div class="end-name">${e.rua}, nº ${e.numero}</div>
-          <div class="end-bar-wrap"><div class="end-bar" style="width:${Math.round(e.count/maxCount*100)}%"></div></div>
-          <div class="end-count">${e.count}x</div>
-          <div class="end-taxa">${fmt(e.taxa)}</div>
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;
+          border-bottom:1px solid rgba(255,255,255,0.05);">
+          <div style="width:22px;height:22px;border-radius:6px;background:rgba(96,165,250,0.1);
+            display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;
+            color:var(--accent);flex-shrink:0;">${i+1}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+              color:var(--text);">${e.rua}, nº ${e.numero}</div>
+            <div style="height:3px;background:rgba(255,255,255,0.06);border-radius:2px;margin-top:4px;">
+              <div style="height:100%;border-radius:2px;width:${Math.round(e.count/maxCount*100)}%;
+                background:linear-gradient(90deg,#3b6ef0,#818cf8);"></div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+            <div style="font-size:11px;font-weight:700;color:var(--text2);">${e.count}x</div>
+            <div style="font-size:12px;font-weight:800;color:var(--green);min-width:52px;text-align:right;">${fmt(e.taxa)}</div>
+          </div>
         </div>`).join('')}
     </div>
   `;
@@ -604,20 +617,41 @@ function renderVisao(){
         labels:ultimos14.map(d=>d.label),
         datasets:[{
           data:ultimos14.map(d=>d.count),
-          backgroundColor:ultimos14.map(d=>d.dia===hj?'rgba(52,211,153,0.7)':'rgba(96,165,250,0.5)'),
-          borderRadius:6,borderSkipped:false,
+          backgroundColor:ultimos14.map(d=>d.dia===hj?'rgba(52,211,153,0.75)':'rgba(96,165,250,0.6)'),
+          borderRadius:5,
+          borderSkipped:false,
+          borderColor:ultimos14.map(d=>d.dia===hj?'rgba(52,211,153,1)':'rgba(96,165,250,0.8)'),
+          borderWidth:0,
         }]
       },
       options:{
-        responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{display:false},tooltip:{
-          backgroundColor:'rgba(8,13,30,0.95)',titleColor:'#f0f4ff',bodyColor:'#94a3b8',
-          borderColor:'rgba(255,255,255,0.1)',borderWidth:1,
-          callbacks:{label:ctx=>`${ctx.raw} entregas`}
-        }},
+        responsive:true,
+        maintainAspectRatio:false,
+        plugins:{
+          legend:{display:false},
+          tooltip:{
+            backgroundColor:'rgba(8,13,30,0.95)',
+            titleColor:'#f0f4ff',
+            bodyColor:'#94a3b8',
+            borderColor:'rgba(255,255,255,0.1)',
+            borderWidth:1,
+            padding:10,
+            callbacks:{
+              title:items=>`${items[0].label}`,
+              label:c=>`  ${c.raw} entrega${c.raw!==1?'s':''}`
+            }
+          }
+        },
         scales:{
-          x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#94a3b8',font:{size:10}}},
-          y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#94a3b8',font:{size:10}},beginAtZero:true}
+          x:{
+            grid:{display:false},
+            ticks:{color:'#94a3b8',font:{size:10},maxRotation:0}
+          },
+          y:{
+            grid:{color:'rgba(255,255,255,0.04)'},
+            ticks:{color:'#94a3b8',font:{size:10},stepSize:5},
+            beginAtZero:true
+          }
         }
       }
     });

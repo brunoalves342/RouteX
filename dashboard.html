@@ -1047,50 +1047,73 @@ function renderHistorico(){
     return;
   }
 
+  // Agrupa por mês
+  const meses = {};
+  const nomeMes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  dias.forEach(([dia, ents])=>{
+    const [y,m] = dia.split('-');
+    const chave = `${y}-${m}`;
+    if(!meses[chave]) meses[chave] = { label: `${nomeMes[parseInt(m)-1]} ${y}`, dias: [] };
+    meses[chave].dias.push([dia, ents]);
+  });
+
   let html=`<div class="filters">
     <button class="filter-btn ${filtroMeses===1?'active':''}" onclick="setFiltro(1)">Este mês</button>
     <button class="filter-btn ${filtroMeses===3?'active':''}" onclick="setFiltro(3)">3 meses</button>
     <button class="filter-btn ${filtroMeses===6?'active':''}" onclick="setFiltro(6)">6 meses</button>
-  </div><div class="card"><div class="card-title">Histórico de dias</div>`;
+  </div>`;
 
-  dias.forEach(([dia,ents])=>{
-    const lista=Object.values(ents);
-    const total=lista.reduce((s,e)=>s+(e.taxa||0),0);
-    const porUser={};
-    lista.forEach(e=>{ if(!porUser[e._user]) porUser[e._user]=0; porUser[e._user]+=(e.taxa||0); });
-    const resumo=Object.entries(porUser).map(([u,t])=>`${u}: ${fmt(t)}`).join(' · ');
-    const diaId = dia.replace(/-/g,'_');
+  Object.entries(meses).sort(([a],[b])=>b.localeCompare(a)).forEach(([chave, mes])=>{
+    // Total do mês
+    const totalMes = mes.dias.reduce((s,[,ents])=>s+Object.values(ents).reduce((ss,e)=>ss+(e.taxa||0),0), 0);
+    const totalEnts = mes.dias.reduce((s,[,ents])=>s+Object.values(ents).length, 0);
 
-    html+=`<div class="hist-row" onclick="toggleDiaDetail('${diaId}')">
-      <div>
-        <div class="hist-date">${fmtData(dia)}</div>
-        <div class="hist-info">${lista.length} entregas · ${resumo}</div>
+    html += `<div class="card" style="margin-bottom:14px;">
+      <div class="card-title">
+        📅 ${mes.label}
+        <span>${totalEnts} entregas · <span style="color:var(--green);font-weight:800;">${fmt(totalMes)}</span></span>
+      </div>`;
+
+    mes.dias.forEach(([dia,ents])=>{
+      const lista=Object.values(ents);
+      const total=lista.reduce((s,e)=>s+(e.taxa||0),0);
+      const porUser={};
+      lista.forEach(e=>{ if(!porUser[e._user]) porUser[e._user]=0; porUser[e._user]+=(e.taxa||0); });
+      const resumo=Object.entries(porUser).map(([u,t])=>`${u}: ${fmt(t)}`).join(' · ');
+      const diaId = dia.replace(/-/g,'_');
+
+      html+=`<div class="hist-row" onclick="toggleDiaDetail('${diaId}')">
+        <div>
+          <div class="hist-date">${fmtData(dia)}</div>
+          <div class="hist-info">${lista.length} entregas · ${resumo}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div class="hist-total">${fmt(total)}</div>
+          <div style="color:var(--text2);font-size:18px;" id="chev_${diaId}">›</div>
+        </div>
       </div>
-      <div style="display:flex;align-items:center;gap:12px;">
-        <div class="hist-total">${fmt(total)}</div>
-        <div style="color:var(--text2);font-size:18px;" id="chev_${diaId}">›</div>
-      </div>
-    </div>
-    <div id="detail_${diaId}" style="display:none;padding:8px 0 12px;">
-      ${lista.sort((a,b)=>a.ts-b.ts).map((e,i)=>`
-        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;
-          background:rgba(255,255,255,0.02);border-radius:8px;margin-bottom:4px;cursor:pointer;"
-          onclick="event.stopPropagation();abrirDetalhe(${JSON.stringify(e).replace(/"/g,'&quot;')},'${e._user}','${dia}')">
-          <div style="width:24px;height:24px;background:rgba(96,165,250,0.1);border-radius:6px;
-            display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;
-            color:var(--accent);flex-shrink:0;">${i+1}</div>
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-              ${e.rua||''}, nº ${e.numero||''}</div>
-            <div style="font-size:10px;color:var(--text2);">${e._user} · ${fmtHora(e.ts||0)}</div>
-          </div>
-          <div style="font-size:13px;font-weight:800;color:var(--green);">${fmt(e.taxa||0)}</div>
-          <div style="font-size:12px;color:var(--text2);">✏️</div>
-        </div>`).join('')}
-    </div>`;
+      <div id="detail_${diaId}" style="display:none;padding:8px 0 12px;">
+        ${lista.sort((a,b)=>a.ts-b.ts).map((e,i)=>`
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;
+            background:rgba(255,255,255,0.02);border-radius:8px;margin-bottom:4px;cursor:pointer;"
+            onclick="event.stopPropagation();abrirDetalhe(${JSON.stringify(e).replace(/"/g,'&quot;')},'${e._user}','${dia}')">
+            <div style="width:24px;height:24px;background:rgba(96,165,250,0.1);border-radius:6px;
+              display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;
+              color:var(--accent);flex-shrink:0;">${i+1}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                ${e.rua||''}, nº ${e.numero||''}</div>
+              <div style="font-size:10px;color:var(--text2);">${e._user} · ${fmtHora(e.ts||0)}</div>
+            </div>
+            <div style="font-size:13px;font-weight:800;color:var(--green);">${fmt(e.taxa||0)}</div>
+            <div style="font-size:12px;color:var(--text2);">✏️</div>
+          </div>`).join('')}
+      </div>`;
+    });
+
+    html += `</div>`; // fecha card do mês
   });
 
-  html+=`</div>`;
   document.getElementById('content').innerHTML=html;
 }
 </script>

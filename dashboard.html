@@ -966,40 +966,112 @@ const _grupos = [
   { id:'entregador', label:'Entregadores',  emoji:'🛵', cor:'rgba(52,211,153,0.12)',  borda:'rgba(52,211,153,0.25)',  txt:'#34d399' },
 ];
 
-function renderPerfis(){
-  const grupos = _grupos.map(g=>({
-    ...g, count: Object.values(_perfisDB).filter(i=>i.tipo===g.id).length
-  }));
+function selecionarTipo(tipo){
+  document.getElementById('novoTipo').value = tipo;
+  ['entregador','supervisor'].forEach(t=>{
+    const card = document.getElementById(`tipoCard_${t}`);
+    if(!card) return;
+    if(t===tipo){
+      const cor = t==='entregador'?'rgba(52,211,153,0.15)':'rgba(96,165,250,0.15)';
+      const borda = t==='entregador'?'rgba(52,211,153,0.5)':'rgba(96,165,250,0.5)';
+      const txt = t==='entregador'?'#34d399':'#60a5fa';
+      card.style.background=cor; card.style.border=`2px solid ${borda}`;
+      card.querySelector('div:nth-child(2)').style.color=txt;
+    } else {
+      card.style.background='rgba(255,255,255,0.03)';
+      card.style.border='1.5px solid rgba(255,255,255,0.08)';
+      card.querySelector('div:nth-child(2)').style.color='var(--text2)';
+    }
+  });
+}
 
+function renderPerfis(){
+  // Mostra tudo direto — sem precisar clicar nos grupos
   let html = `
-  <!-- Cabeçalho com botão novo perfil -->
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-    <div style="font-size:13px;color:var(--text2);">Clique num grupo para ver os perfis</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div style="font-size:13px;color:var(--text2);">Gerencie todos os perfis do sistema</div>
     <button onclick="abrirModalNovoPerfil()"
       style="background:linear-gradient(135deg,#3b6ef0,#818cf8);color:#fff;border:none;
       border-radius:10px;padding:9px 18px;font-size:13px;font-weight:700;
-      font-family:'Inter',sans-serif;cursor:pointer;display:flex;align-items:center;gap:6px;">
+      font-family:'Inter',sans-serif;cursor:pointer;">
       ＋ Novo perfil
     </button>
-  </div>
+  </div>`;
 
-  <!-- Cards dos grupos -->
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
-    ${grupos.map(g=>`
-    <div onclick="abrirGrupoPerfil('${g.id}')" id="gcard_${g.id}"
-      style="cursor:pointer;background:${g.cor};border:1.5px solid ${g.borda};
-      border-radius:16px;padding:24px 16px;text-align:center;transition:all 0.15s;user-select:none;">
-      <div style="font-size:32px;margin-bottom:10px;">${g.emoji}</div>
-      <div style="font-size:15px;font-weight:800;color:${g.txt};margin-bottom:4px;">${g.label}</div>
-      <div style="font-size:12px;color:var(--text2);">${g.count} perfil${g.count!==1?'s':''}</div>
-    </div>`).join('')}
-  </div>
+  _grupos.forEach(g=>{
+    const users = Object.entries(_perfisDB).filter(([,i])=>i.tipo===g.id);
+    const canDelete = g.id !== 'adm';
 
-  <!-- Detalhe do grupo -->
-  <div id="grupoPerfisDetalhe" style="display:none;"></div>`;
+    html += `
+    <div style="margin-bottom:20px;">
+      <!-- Cabeçalho do grupo -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:0 4px;">
+        <div style="width:3px;height:18px;background:${g.txt};border-radius:2px;"></div>
+        <div style="font-size:14px;font-weight:800;color:${g.txt};">${g.emoji} ${g.label}</div>
+        <div style="font-size:12px;color:var(--text2);">${users.length} perfil${users.length!==1?'s':''}</div>
+      </div>
+
+      <!-- Perfis do grupo em grid -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;">
+        ${users.length===0
+          ? `<div style="background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;
+              padding:16px;color:var(--text2);font-size:13px;text-align:center;">
+              Nenhum perfil neste grupo
+            </div>`
+          : users.map(([user,info])=>`
+          <div style="background:var(--glass);border:1px solid var(--glass-border);
+            border-radius:14px;padding:16px;">
+
+            <!-- Header do perfil -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <div style="width:38px;height:38px;border-radius:10px;background:${g.cor};
+                  display:flex;align-items:center;justify-content:center;font-size:18px;">${info.emoji}</div>
+                <div>
+                  <div style="font-size:14px;font-weight:800;">${user}</div>
+                  <div style="font-size:10px;color:${g.txt};font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">${g.label}</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                ${canDelete ? `<button onclick="excluirPerfil('${user}')"
+                  style="background:rgba(248,113,113,0.1);color:var(--red);border:1px solid rgba(248,113,113,0.2);
+                  border-radius:8px;width:32px;height:32px;font-size:14px;cursor:pointer;
+                  display:flex;align-items:center;justify-content:center;">🗑</button>` : ''}
+              </div>
+            </div>
+
+            <!-- Info -->
+            <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span style="font-size:11px;color:var(--text2);">Login</span>
+                <span style="font-size:12px;font-weight:700;">${user}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:11px;color:var(--text2);">Senha</span>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span style="font-size:12px;font-weight:700;" id="senhaVal_${user}">••••••</span>
+                  <button onclick="toggleVerSenha('${user}','${info.senha}')"
+                    style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--text2);">👁️</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Editar senha -->
+            <button class="btn-edit-sm" style="width:100%;justify-content:center;"
+              onclick="toggleEditSenha('${user}')">✏️ Editar senha</button>
+            <div class="edit-senha-form" id="formSenha_${user}" style="margin-top:8px;">
+              <div class="edit-senha-row">
+                <input class="modal-input" type="text" id="inputSenha_${user}" value="${info.senha}" style="flex:1;font-size:13px;" />
+                <button class="btn-save" style="padding:8px 14px;font-size:12px;" onclick="salvarSenha('${user}')">✓</button>
+                <button class="btn-cancel" style="padding:8px 10px;font-size:12px;" onclick="toggleEditSenha('${user}')">✕</button>
+              </div>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  });
 
   document.getElementById('content').innerHTML = html;
-  if(_grupoAberto) abrirGrupoPerfil(_grupoAberto);
 }
 
 function abrirGrupoPerfil(grupoId){
@@ -1100,10 +1172,25 @@ function abrirModalNovoPerfil(){
 
       <div class="modal-field">
         <div class="modal-label">Tipo de perfil</div>
-        <select id="novoTipo" class="modal-input" style="cursor:pointer;">
-          <option value="entregador">🛵 Entregador</option>
-          <option value="supervisor">👀 Supervisor</option>
-        </select>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px;">
+          <div id="tipoCard_entregador" onclick="selecionarTipo('entregador')"
+            style="cursor:pointer;border-radius:12px;padding:14px;text-align:center;
+            background:rgba(52,211,153,0.15);border:2px solid rgba(52,211,153,0.5);
+            transition:all 0.15s;user-select:none;">
+            <div style="font-size:24px;margin-bottom:6px;">🛵</div>
+            <div style="font-size:13px;font-weight:800;color:#34d399;">Entregador</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px;">Registra entregas</div>
+          </div>
+          <div id="tipoCard_supervisor" onclick="selecionarTipo('supervisor')"
+            style="cursor:pointer;border-radius:12px;padding:14px;text-align:center;
+            background:rgba(96,165,250,0.06);border:1.5px solid rgba(255,255,255,0.08);
+            transition:all 0.15s;user-select:none;">
+            <div style="font-size:24px;margin-bottom:6px;">👀</div>
+            <div style="font-size:13px;font-weight:800;color:var(--text2);">Supervisor</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px;">Somente visualiza</div>
+          </div>
+        </div>
+        <input type="hidden" id="novoTipo" value="entregador" />
       </div>
 
       <div id="novoPerfilErr" style="font-size:12px;color:var(--red);min-height:16px;margin-bottom:8px;"></div>

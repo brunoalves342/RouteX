@@ -674,56 +674,154 @@ async function excluirEntrega(){
 function renderEntregadores(){
   const todas=getTodasEntregas();
   const inicio=inicioMesFiltro();
-  const avColors=['background:rgba(96,165,250,0.15);color:var(--accent)','background:rgba(52,211,153,0.15);color:var(--green)'];
+  const hj=hoje();
+  const avBg=['rgba(96,165,250,0.15)','rgba(52,211,153,0.15)'];
+  const avClr=['var(--accent)','var(--green)'];
+  const avGrad=['#3b6ef0,#818cf8','#059669,#34d399'];
 
-  let html=`<div class="filters">
+  // Coleta dados dos últimos 14 dias pra gráfico
+  const ultimos14=[];
+  for(let i=13;i>=0;i--){
+    const d=new Date(); d.setDate(d.getDate()-i);
+    const s=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    ultimos14.push({label:`${d.getDate()}/${d.getMonth()+1}`,dia:s});
+  }
+
+  let html=`<div class="filters" style="margin-bottom:20px;">
     <button class="filter-btn ${filtroMeses===1?'active':''}" onclick="setFiltro(1)">Este mês</button>
     <button class="filter-btn ${filtroMeses===3?'active':''}" onclick="setFiltro(3)">3 meses</button>
     <button class="filter-btn ${filtroMeses===6?'active':''}" onclick="setFiltro(6)">6 meses</button>
   </div>`;
 
-  html+=`<div class="grid2">`;
-  ENTREGADORES.forEach((u,i)=>{
+  // Cards individuais — um por linha, mais detalhados
+  ENTREGADORES.forEach((u,idx)=>{
     const userDias=getEntregasUser(u);
     const diasFilt=Object.entries(userDias).filter(([d])=>d>=inicio);
     const todas_u=diasFilt.flatMap(([,ents])=>Object.values(ents));
     const total=todas_u.length;
     const soma=todas_u.reduce((s,e)=>s+(e.taxa||0),0);
-    const media=total>0?soma/total:0;
-    const hj=hoje();
+    const media=total>0?(soma/total):0;
     const hoje_u=Object.values(userDias[hj]||{});
+    const hojeQtd=hoje_u.length;
     const hojeTotal=hoje_u.reduce((s,e)=>s+(e.taxa||0),0);
 
-    html+=`<div class="card">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
-        <div class="ent-avatar" style="width:48px;height:48px;font-size:16px;${avColors[i]}">${u.substring(0,2).toUpperCase()}</div>
-        <div>
-          <div style="font-size:16px;font-weight:800;">${u}</div>
-          <div style="font-size:11px;color:var(--text2);">Entregador</div>
+    // Dias com entrega (no período)
+    const diasComEntrega=diasFilt.filter(([,ents])=>Object.keys(ents).length>0).length;
+    const mediaEntregasDia=diasComEntrega>0?(total/diasComEntrega):0;
+
+    // Top 3 endereços deste entregador
+    const endMap={};
+    todas_u.forEach(e=>{
+      if(!e.rua) return;
+      const k=e.rua.trim().toLowerCase();
+      if(!endMap[k]) endMap[k]={rua:e.rua.trim(),count:0};
+      endMap[k].count++;
+    });
+    const top3=Object.values(endMap).sort((a,b)=>b.count-a.count).slice(0,3);
+    const maxCount=top3[0]?.count||1;
+
+    // Dados do gráfico (últimos 14 dias)
+    const chartData=ultimos14.map(({dia})=>{
+      const ents=userDias[dia]||{};
+      return Object.values(ents).length;
+    });
+    const chartMax=Math.max(...chartData,1);
+
+    html+=`
+    <div class="card" style="margin-bottom:16px;">
+      <!-- Header do entregador -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="width:52px;height:52px;border-radius:14px;background:${avBg[idx]};
+            display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;
+            color:${avClr[idx]};letter-spacing:-1px;">${u.substring(0,2).toUpperCase()}</div>
+          <div>
+            <div style="font-size:18px;font-weight:900;letter-spacing:-0.4px;">${u}</div>
+            <div style="font-size:12px;color:var(--text2);margin-top:2px;">🛵 Entregador</div>
+          </div>
         </div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center;">
-          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Entregas</div>
-          <div style="font-size:22px;font-weight:900;">${total}</div>
-        </div>
-        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center;">
-          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Total taxas</div>
-          <div style="font-size:18px;font-weight:900;color:var(--green);">${fmt(soma)}</div>
-        </div>
-        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center;">
-          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Taxa média</div>
-          <div style="font-size:18px;font-weight:900;color:var(--accent);">${fmt(media)}</div>
-        </div>
-        <div style="background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.2);border-radius:10px;padding:12px;text-align:center;">
-          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Hoje</div>
+        <!-- Badge hoje -->
+        <div style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);
+          border-radius:12px;padding:10px 18px;text-align:right;">
+          <div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;">Hoje</div>
           <div style="font-size:18px;font-weight:900;color:var(--green);">${fmt(hojeTotal)}</div>
+          <div style="font-size:11px;color:var(--text2);">${hojeQtd} entrega${hojeQtd!==1?'s':''}</div>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--text2);text-align:center;">${hoje_u.length} entregas hoje</div>
+
+      <!-- Métricas em linha -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;">
+        <div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px;text-align:center;">
+          <div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Total entregas</div>
+          <div style="font-size:26px;font-weight:900;letter-spacing:-1px;">${total}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:4px;">no período</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px;text-align:center;">
+          <div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Total taxas</div>
+          <div style="font-size:20px;font-weight:900;color:var(--green);letter-spacing:-0.5px;">${fmt(soma)}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:4px;">no período</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px;text-align:center;">
+          <div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Taxa média</div>
+          <div style="font-size:20px;font-weight:900;color:${avClr[idx]};letter-spacing:-0.5px;">${fmt(media)}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:4px;">por entrega</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px;text-align:center;">
+          <div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Média/dia</div>
+          <div style="font-size:26px;font-weight:900;letter-spacing:-1px;">${mediaEntregasDia.toFixed(1)}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:4px;">entregas/dia</div>
+        </div>
+      </div>
+
+      <!-- Gráfico + Top endereços -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+        <!-- Mini gráfico -->
+        <div style="background:rgba(255,255,255,0.02);border-radius:12px;padding:14px;">
+          <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;
+            letter-spacing:0.5px;margin-bottom:12px;">Entregas — últimos 14 dias</div>
+          <div style="display:flex;align-items:flex-end;gap:4px;height:60px;">
+            ${chartData.map((v,i)=>{
+              const h=chartMax>0?Math.round(v/chartMax*100):0;
+              const isHoje=ultimos14[i].dia===hj;
+              return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;">
+                <div style="width:100%;border-radius:3px 3px 0 0;height:${h}%;min-height:${v>0?'4px':'0'};
+                  background:${isHoje?'var(--green)':'linear-gradient(180deg,'+avGrad[idx]+')'};opacity:${v>0?1:0.15};
+                  transition:height 0.3s;"></div>
+              </div>`;
+            }).join('')}
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;">
+            <div style="font-size:9px;color:var(--text2);">${ultimos14[0].label}</div>
+            <div style="font-size:9px;color:var(--green);">Hoje</div>
+          </div>
+        </div>
+
+        <!-- Top endereços -->
+        <div style="background:rgba(255,255,255,0.02);border-radius:12px;padding:14px;">
+          <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;
+            letter-spacing:0.5px;margin-bottom:12px;">Top endereços</div>
+          ${top3.length===0
+            ? `<div style="font-size:12px;color:var(--text2);text-align:center;padding:16px 0;">Nenhuma entrega no período</div>`
+            : top3.map((e,i)=>`
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:${i<2?'10px':'0'};">
+                <div style="width:18px;height:18px;border-radius:5px;background:${avBg[idx]};
+                  display:flex;align-items:center;justify-content:center;font-size:10px;
+                  font-weight:800;color:${avClr[idx]};flex-shrink:0;">${i+1}</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e.rua}</div>
+                  <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:2px;margin-top:4px;">
+                    <div style="height:100%;border-radius:2px;width:${Math.round(e.count/maxCount*100)}%;
+                      background:linear-gradient(90deg,${avGrad[idx]});"></div>
+                  </div>
+                </div>
+                <div style="font-size:11px;font-weight:700;color:var(--text2);flex-shrink:0;">${e.count}x</div>
+              </div>`).join('')}
+        </div>
+      </div>
     </div>`;
   });
-  html+=`</div>`;
+
   document.getElementById('content').innerHTML=html;
 }
 

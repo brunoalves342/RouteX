@@ -788,6 +788,42 @@ function filtrarEnd(txt){
     </div>`).join('');
 }
 
+function filtrarDia(user){
+  // Destaca card selecionado
+  const todosCards = ['todos', ...ENTREGADORES];
+  todosCards.forEach(u=>{
+    const card = document.getElementById(`card_ent_${u}`);
+    if(!card) return;
+    if(u === user){
+      card.style.borderWidth = '2px';
+      card.style.borderColor = u==='todos' ? 'rgba(96,165,250,0.6)' : 'rgba(52,211,153,0.6)';
+      card.style.boxShadow = u==='todos'
+        ? '0 0 16px rgba(96,165,250,0.2)'
+        : '0 0 16px rgba(52,211,153,0.2)';
+    } else {
+      card.style.borderWidth = '1px';
+      card.style.borderColor = u==='todos' ? 'rgba(96,165,250,0.18)' : 'rgba(52,211,153,0.18)';
+      card.style.boxShadow = 'none';
+      card.style.opacity = '0.6';
+    }
+  });
+
+  // Filtra os itens
+  const itens = document.querySelectorAll('.dia-item');
+  let visiveis = 0;
+  itens.forEach(el=>{
+    const show = user==='todos' || el.dataset.user===user;
+    el.style.display = show ? '' : 'none';
+    if(show) visiveis++;
+  });
+
+  // Atualiza label
+  const label = document.getElementById('labelFiltro');
+  if(label) label.textContent = user==='todos'
+    ? `${visiveis} no total`
+    : `${visiveis} do ${user}`;
+}
+
 function toggleHojeDetail(id){
   const el  = document.getElementById(id);
   const user = id.replace('hoje_','');
@@ -1180,19 +1216,27 @@ function verDiaDetalhe(dia){
       </div>
     </div>
 
-    <!-- Resumo por entregador -->
+    <!-- Resumo por entregador — clicável para filtrar -->
     <div style="display:flex;gap:10px;margin-bottom:16px;flex-shrink:0;">
       ${Object.entries(porUser).map(([u,t])=>`
-        <div style="flex:1;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.18);
-          border-radius:12px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
+        <div id="card_ent_${u}" onclick="filtrarDia('${u}')" style="flex:1;cursor:pointer;
+          background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.18);
+          border-radius:12px;padding:12px 16px;display:flex;justify-content:space-between;
+          align-items:center;transition:all 0.15s;user-select:none;"
+          onmouseover="this.style.opacity='0.8'"
+          onmouseout="this.style.opacity='1'">
           <div>
             <div style="font-size:12px;color:var(--text2);margin-bottom:2px;">${u}</div>
             <div style="font-size:11px;color:var(--text2);">${lista.filter(e=>e._user===u).length} entregas</div>
           </div>
           <div style="font-size:18px;font-weight:900;color:var(--green);">${fmt(t)}</div>
         </div>`).join('')}
-      <div style="flex:1;background:rgba(96,165,250,0.08);border:1px solid rgba(96,165,250,0.18);
-        border-radius:12px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
+      <div id="card_ent_todos" onclick="filtrarDia('todos')" style="flex:1;cursor:pointer;
+        background:rgba(96,165,250,0.08);border:2px solid rgba(96,165,250,0.3);
+        border-radius:12px;padding:12px 16px;display:flex;justify-content:space-between;
+        align-items:center;transition:all 0.15s;user-select:none;"
+        onmouseover="this.style.opacity='0.8'"
+        onmouseout="this.style.opacity='1'">
         <div style="font-size:12px;color:var(--text2);">Total geral</div>
         <div style="font-size:18px;font-weight:900;color:var(--accent);">${fmt(total)}</div>
       </div>
@@ -1200,10 +1244,11 @@ function verDiaDetalhe(dia){
 
     <!-- Lista de entregas -->
     <div class="card" style="flex:1;display:flex;flex-direction:column;min-height:0;">
-      <div class="card-title" style="flex-shrink:0;">Entregas do dia <span>${lista.length} no total</span></div>
-      <div style="overflow-y:auto;flex:1;">
+      <div class="card-title" style="flex-shrink:0;">Entregas do dia <span id="labelFiltro">${lista.length} no total</span></div>
+      <div style="overflow-y:auto;flex:1;" id="listaDia">
         ${lista.map((e,i)=>`
-          <div style="display:flex;align-items:center;gap:12px;padding:10px 0;
+          <div class="dia-item" data-user="${e._user}"
+            style="display:flex;align-items:center;gap:12px;padding:10px 0;
             border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;transition:background 0.12s;"
             onmouseover="this.style.background='rgba(255,255,255,0.02)'"
             onmouseout="this.style.background='transparent'"

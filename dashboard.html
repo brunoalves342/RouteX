@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RouteX — Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  --accent:#60a5fa;--accent2:#818cf8;--green:#34d399;--red:#f87171;--yellow:#fbbf24;
+  --text:#f0f4ff;--text2:#94a3b8;
+  --glass:rgba(255,255,255,0.05);--glass-border:rgba(255,255,255,0.10);
+  --input-bg:rgba(0,0,0,0.25);--radius:16px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:#060a18;color:var(--text);overflow:hidden;}
+
+/* BG */
+.bg{position:fixed;inset:0;z-index:0;background:
+  radial-gradient(ellipse 70% 60% at 10% 10%,rgba(56,100,220,0.35) 0%,transparent 60%),
+  radial-gradient(ellipse 60% 50% at 90% 80%,rgba(99,60,220,0.25) 0%,transparent 55%),
+  #060a18;}
+.orb{position:fixed;border-radius:50%;filter:blur(80px);pointer-events:none;z-index:0;}
+.orb1{width:400px;height:400px;background:rgba(56,100,220,0.2);top:-100px;left:-100px;}
+.orb2{width:300px;height:300px;background:rgba(120,60,240,0.15);bottom:0;right:0;}
+
+/* LAYOUT */
+.app{position:relative;z-index:1;display:grid;grid-template-columns:220px 1fr;height:100vh;}
+
+/* SIDEBAR */
+.sidebar{background:rgba(6,10,24,0.7);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-right:1px solid var(--glass-border);display:flex;flex-direction:column;overflow:hidden;}
+.sidebar-logo{padding:24px 20px 20px;border-bottom:1px solid var(--glass-border);}
+.logo-icon{width:40px;height:40px;background:linear-gradient(135deg,#3b6ef0,#818cf8);
+  border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;
+  box-shadow:0 4px 14px rgba(59,110,240,0.45);margin-bottom:10px;}
+.logo-title{font-size:18px;font-weight:800;letter-spacing:-0.4px;}
+.logo-sub{font-size:11px;font-weight:500;color:var(--text2);margin-top:2px;}
+
+.nav-section{font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;
+  letter-spacing:0.8px;padding:16px 20px 6px;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 20px;font-size:13px;font-weight:600;
+  color:var(--text2);cursor:pointer;border-left:2px solid transparent;transition:all 0.15s;}
+.nav-item:hover{color:var(--text);background:var(--glass);}
+.nav-item.active{color:var(--accent);background:rgba(96,165,250,0.08);border-left-color:var(--accent);}
+.nav-item svg{width:16px;height:16px;flex-shrink:0;}
+
+.sidebar-footer{margin-top:auto;padding:16px 20px;border-top:1px solid var(--glass-border);}
+.btn-sair{width:100%;background:rgba(248,113,113,0.12);color:var(--red);
+  border:1px solid rgba(248,113,113,0.25);border-radius:10px;padding:10px;
+  font-size:13px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;}
+
+/* LOGIN */
+.login-wrap{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;
+  background:rgba(6,10,24,0.95);backdrop-filter:blur(10px);}
+.login-card{width:340px;background:rgba(255,255,255,0.05);backdrop-filter:blur(24px);
+  border:1px solid var(--glass-border);border-radius:24px;padding:32px;
+  box-shadow:0 8px 40px rgba(0,0,0,0.5);}
+.login-logo{width:60px;height:60px;background:linear-gradient(135deg,#3b6ef0,#818cf8);
+  border-radius:18px;display:flex;align-items:center;justify-content:center;
+  font-size:28px;margin:0 auto 16px;box-shadow:0 4px 20px rgba(59,110,240,0.5);}
+.login-title{font-size:20px;font-weight:800;text-align:center;margin-bottom:4px;}
+.login-sub{font-size:13px;color:var(--text2);text-align:center;margin-bottom:24px;}
+.login-label{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;}
+.login-input{width:100%;background:rgba(0,0,0,0.3);border:1.5px solid var(--glass-border);
+  border-radius:12px;padding:12px 14px;color:var(--text);font-size:15px;font-weight:500;
+  font-family:'Inter',sans-serif;outline:none;margin-bottom:12px;-webkit-appearance:none;}
+.login-input:focus{border-color:rgba(96,165,250,0.55);}
+.login-input::placeholder{color:rgba(148,163,184,0.3);}
+.btn-login{width:100%;background:linear-gradient(135deg,#3b6ef0,#818cf8);color:#fff;
+  border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:800;
+  font-family:'Inter',sans-serif;cursor:pointer;margin-top:4px;}
+.login-err{font-size:12px;font-weight:600;color:var(--red);text-align:center;min-height:16px;margin-top:6px;}
+
+/* MAIN */
+.main{display:flex;flex-direction:column;overflow:hidden;}
+.topbar{flex-shrink:0;padding:20px 28px;background:rgba(6,10,24,0.5);
+  backdrop-filter:blur(20px);border-bottom:1px solid var(--glass-border);
+  display:flex;align-items:center;justify-content:space-between;}
+.topbar-title{font-size:18px;font-weight:800;letter-spacing:-0.4px;}
+.topbar-sub{font-size:12px;color:var(--text2);margin-top:2px;}
+.topbar-right{display:flex;align-items:center;gap:10px;}
+.badge-user{background:rgba(96,165,250,0.12);border:1px solid rgba(96,165,250,0.2);
+  border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;color:var(--accent);}
+.btn-refresh{background:var(--glass);border:1px solid var(--glass-border);border-radius:10px;
+  padding:8px 14px;font-size:12px;font-weight:700;color:var(--text2);cursor:pointer;
+  font-family:'Inter',sans-serif;}
+.btn-refresh:hover{background:rgba(255,255,255,0.08);}
+
+.content{flex:1;overflow-y:auto;padding:24px 28px;display:flex;flex-direction:column;gap:20px;}
+.content::-webkit-scrollbar{width:4px;}
+.content::-webkit-scrollbar-track{background:transparent;}
+.content::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px;}
+
+/* FILTROS */
+.filters{display:flex;gap:8px;}
+.filter-btn{background:var(--glass);border:1px solid var(--glass-border);border-radius:20px;
+  padding:6px 16px;font-size:12px;font-weight:700;color:var(--text2);cursor:pointer;
+  font-family:'Inter',sans-serif;transition:all 0.15s;}
+.filter-btn.active{background:rgba(96,165,250,0.15);border-color:rgba(96,165,250,0.3);color:var(--accent);}
+
+/* MÉTRICAS */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;}
+.metric{background:var(--glass);backdrop-filter:blur(20px);border:1px solid var(--glass-border);
+  border-radius:var(--radius);padding:18px;position:relative;overflow:hidden;}
+.metric::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.1),transparent);}
+.metric-icon{font-size:22px;margin-bottom:10px;}
+.metric-label{font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.7px;margin-bottom:6px;}
+.metric-val{font-size:28px;font-weight:900;letter-spacing:-1px;line-height:1;}
+.metric-sub{font-size:11px;font-weight:600;margin-top:6px;}
+.up{color:var(--green);}
+.metric-val.green{background:linear-gradient(135deg,#34d399,#60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+
+/* GRID */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.grid3{display:grid;grid-template-columns:2fr 1fr;gap:14px;}
+.card{background:var(--glass);backdrop-filter:blur(20px);border:1px solid var(--glass-border);
+  border-radius:var(--radius);padding:18px;position:relative;overflow:hidden;}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.1),transparent);}
+.card-title{font-size:13px;font-weight:700;letter-spacing:-0.2px;margin-bottom:14px;
+  display:flex;align-items:center;justify-content:space-between;}
+.card-title span{font-size:11px;font-weight:500;color:var(--text2);}
+
+/* GRÁFICO */
+.chart-wrap{position:relative;height:160px;}
+
+/* ENTREGADORES */
+.ent-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);}
+.ent-row:last-child{border:none;padding-bottom:0;}
+.ent-avatar{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;
+  justify-content:center;font-size:13px;font-weight:800;flex-shrink:0;}
+.ent-info{flex:1;min-width:0;}
+.ent-name{font-size:13px;font-weight:700;}
+.ent-detail{font-size:11px;color:var(--text2);margin-top:1px;}
+.ent-taxa{font-size:15px;font-weight:800;color:var(--green);}
+
+/* TOTAL DIA */
+.total-dia{background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.18);
+  border-radius:12px;padding:12px 16px;display:flex;justify-content:space-between;
+  align-items:center;margin-top:10px;}
+.total-dia-label{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;}
+.total-dia-val{font-size:20px;font-weight:900;color:var(--green);letter-spacing:-0.5px;}
+
+/* TOP ENDEREÇOS */
+.end-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);}
+.end-row:last-child{border:none;}
+.end-rank{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:800;background:rgba(96,165,250,0.12);color:var(--accent);flex-shrink:0;}
+.end-name{flex:1;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.end-bar-wrap{width:80px;height:6px;background:rgba(255,255,255,0.06);border-radius:3px;}
+.end-bar{height:100%;border-radius:3px;background:linear-gradient(90deg,#3b6ef0,#818cf8);}
+.end-count{font-size:11px;font-weight:700;color:var(--text2);width:28px;text-align:right;}
+.end-taxa{font-size:11px;font-weight:700;color:var(--green);width:44px;text-align:right;}
+
+/* HISTÓRICO DIAS */
+.hist-row{display:flex;justify-content:space-between;align-items:center;
+  padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;}
+.hist-row:last-child{border:none;}
+.hist-row:hover .hist-date{color:var(--accent);}
+.hist-date{font-size:13px;font-weight:700;}
+.hist-info{font-size:11px;color:var(--text2);margin-top:2px;}
+.hist-total{font-size:14px;font-weight:800;color:var(--green);}
+
+/* LOADING */
+.loading{display:flex;align-items:center;justify-content:center;padding:32px;
+  color:var(--text2);font-size:13px;font-weight:600;}
+
+/* TOAST */
+.toast{position:fixed;bottom:24px;right:24px;background:rgba(10,15,35,0.95);
+  backdrop-filter:blur(16px);border:1px solid var(--glass-border);color:var(--text);
+  padding:12px 20px;border-radius:12px;font-size:13px;font-weight:600;
+  font-family:'Inter',sans-serif;z-index:200;opacity:0;transition:all 0.22s;
+  pointer-events:none;box-shadow:0 8px 32px rgba(0,0,0,0.5);}
+.toast.show{opacity:1;}
+
+/* MODAL DETALHE */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);
+  z-index:200;display:flex;align-items:center;justify-content:center;opacity:0;
+  pointer-events:none;transition:opacity 0.2s;}
+.modal-bg.show{opacity:1;pointer-events:all;}
+.modal-box{background:rgba(8,13,30,0.97);backdrop-filter:blur(30px);
+  border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:28px;
+  width:480px;max-width:90vw;max-height:85vh;overflow-y:auto;
+  box-shadow:0 20px 60px rgba(0,0,0,0.7);}
+.modal-box::-webkit-scrollbar{width:4px;}
+.modal-box::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px;}
+.modal-title{font-size:16px;font-weight:800;margin-bottom:4px;}
+.modal-sub{font-size:12px;color:var(--text2);margin-bottom:20px;}
+.modal-field{margin-bottom:14px;}
+.modal-label{font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;
+  letter-spacing:0.6px;margin-bottom:6px;}
+.modal-input{width:100%;background:rgba(0,0,0,0.3);border:1.5px solid rgba(255,255,255,0.1);
+  border-radius:10px;padding:10px 12px;color:var(--text);font-size:14px;font-weight:600;
+  font-family:'Inter',sans-serif;outline:none;-webkit-appearance:none;}
+.modal-input:focus{border-color:rgba(96,165,250,0.5);}
+.modal-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.modal-actions{display:flex;gap:10px;margin-top:20px;}
+.btn-save{flex:1;background:linear-gradient(135deg,#3b6ef0,#818cf8);color:#fff;border:none;
+  border-radius:10px;padding:11px;font-size:13px;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;}
+.btn-cancel{background:rgba(255,255,255,0.06);color:var(--text2);border:1px solid rgba(255,255,255,0.1);
+  border-radius:10px;padding:11px 18px;font-size:13px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;}
+.btn-delete{background:rgba(248,113,113,0.12);color:var(--red);border:1px solid rgba(248,113,113,0.2);
+  border-radius:10px;padding:11px 14px;font-size:13px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;}
+
+/* PERFIS */
+.perfil-item{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);
+  border-radius:12px;padding:16px;margin-bottom:10px;}
+.perfil-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.perfil-nome{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px;}
+.perfil-badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;}
+.perfil-badge.adm{background:rgba(251,191,36,0.15);color:var(--yellow);}
+.perfil-badge.supervisor{background:rgba(96,165,250,0.15);color:var(--accent);}
+.perfil-badge.entregador{background:rgba(52,211,153,0.15);color:var(--green);}
+.perfil-info{display:flex;gap:16px;margin-bottom:12px;}
+.perfil-dado{font-size:12px;color:var(--text2);}
+.perfil-dado span{color:var(--text);font-weight:700;}
+.btn-edit-sm{background:rgba(96,165,250,0.12);color:var(--accent);border:1px solid rgba(96,165,250,0.2);
+  border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;}
+.edit-senha-form{display:none;border-top:1px solid rgba(255,255,255,0.07);padding-top:12px;margin-top:4px;}
+.edit-senha-row{display:flex;gap:8px;align-items:center;}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+
+<!-- LOGIN -->
+<div class="login-wrap" id="loginWrap">
+  <div class="login-card">
+    <div class="login-logo">🗺️</div>
+    <div class="login-title">RouteX Dashboard</div>
+    <div class="login-sub">Acesso exclusivo ADM</div>
+    <div>
+      <div class="login-label">Login</div>
+      <input class="login-input" type="text" id="loginNome" placeholder="Seu login" autocomplete="off" />
+    </div>
+    <div>
+      <div class="login-label">Senha</div>
+      <div style="position:relative;">
+        <input class="login-input" type="password" id="loginSenha" placeholder="••••••" style="padding-right:44px;margin-bottom:0;" />
+        <button onclick="toggleSenhaLogin()" type="button"
+          style="position:absolute;right:12px;top:50%;transform:translateY(-50%);
+          background:none;border:none;cursor:pointer;color:var(--text2);font-size:18px;">👁️</button>
+      </div>
+    </div>
+    <div class="login-err" id="loginErr"></div>
+    <button class="btn-login" onclick="fazerLogin()">Entrar</button>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app" id="appWrap" style="display:none;">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">🗺️</div>
+      <div class="logo-title">RouteX</div>
+      <div class="logo-sub">Dashboard ADM</div>
+    </div>
+
+    <div class="nav-section">Menu</div>
+    <div class="nav-item active" id="nav_visao" onclick="setPage('visao')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Visão geral
+    </div>
+    <div class="nav-item" id="nav_entregadores" onclick="setPage('entregadores')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M6 20v-2a6 6 0 0 1 12 0v2"/></svg>
+      Entregadores
+    </div>
+    <div class="nav-item" id="nav_historico" onclick="setPage('historico')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      Histórico
+    </div>
+    <div class="nav-item" id="nav_enderecos" onclick="setPage('enderecos')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>
+      Endereços
+    </div>
+    <div class="nav-section">Configurações</div>
+    <div class="nav-item" id="nav_perfis" onclick="setPage('perfis')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M6 20v-2a6 6 0 0 1 12 0v2"/><path d="M17 16l2 2 4-4"/></svg>
+      Perfis
+    </div>
+
+    <div class="sidebar-footer">
+      <button class="btn-sair" onclick="sair()">Sair</button>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <div class="topbar-title" id="pageTitle">Visão geral</div>
+        <div class="topbar-sub" id="pageDate"></div>
+      </div>
+      <div class="topbar-right">
+        <div class="badge-user" id="badgeUser"></div>
+        <button class="btn-refresh" onclick="carregarDados()">🔄 Atualizar</button>
+      </div>
+    </div>
+
+    <div class="content" id="content">
+      <div class="loading">Carregando...</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Firebase ──
+const firebaseConfig = {
+  apiKey: "AIzaSyC2H6o0S4oit32IiBQyt4-SM3VFqjvqL2I",
+  authDomain: "fatimaentregas-1022.firebaseapp.com",
+  databaseURL: "https://fatimaentregas-1022-default-rtdb.firebaseio.com",
+  projectId: "fatimaentregas-1022",
+  storageBucket: "fatimaentregas-1022.firebasestorage.app",
+  messagingSenderId: "509143838146",
+  appId: "1:509143838146:web:fcffed5c1fbeb880127a5b"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// ── Usuários ──
+const USUARIOS = {
+  'adm':   { senha:'Macaco22', tipo:'adm' },
+  'Andre': { senha:'adm2006',  tipo:'supervisor' },
+};
+
+const ENTREGADORES = ['Bruno','Jonathas'];
+
+let usuarioAtual = null;
+let paginaAtual  = 'visao';
+let allData      = {};
+let chartInstance = null;
+let filtroMeses  = 1;
+
+// ── Utils ──
+function fmt(v){ return 'R$ '+parseFloat(v||0).toFixed(2).replace('.',','); }
+function hoje(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function fmtData(s){ const [y,m,d]=s.split('-'); const M=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']; return `${d} ${M[parseInt(m)-1]} ${y}`; }
+function fmtHora(ts){ const d=new Date(ts); return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'); }
+
+function inicioMesFiltro(){
+  const d = new Date();
+  const m = d.getMonth() - (filtroMeses - 1);
+  const ano = d.getFullYear() + Math.floor(m/12);
+  const mes = ((m%12)+12)%12;
+  return `${ano}-${String(mes+1).padStart(2,'0')}-01`;
+}
+
+function semAcento(s){ return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2500);
+}
+
+// ── Login ──
+function toggleSenhaLogin(){
+  const i=document.getElementById('loginSenha');
+  i.type=i.type==='password'?'text':'password';
+}
+
+function fazerLogin(){
+  const nome  = document.getElementById('loginNome').value.trim();
+  const senha = document.getElementById('loginSenha').value;
+  const err   = document.getElementById('loginErr');
+  const user  = Object.keys(USUARIOS).find(k=>k.toLowerCase()===nome.toLowerCase());
+  if(!user||USUARIOS[user].senha!==senha){ err.textContent='Login ou senha incorretos.'; return; }
+  if(USUARIOS[user].tipo==='entregador'){ err.textContent='Acesso não permitido.'; return; }
+  err.textContent='';
+  usuarioAtual=user;
+  document.getElementById('loginWrap').style.display='none';
+  document.getElementById('appWrap').style.display='grid';
+  document.getElementById('badgeUser').textContent='⚙️ '+user;
+  document.getElementById('pageDate').textContent=fmtData(hoje());
+  carregarDados();
+}
+
+document.getElementById('loginNome').addEventListener('keydown',e=>{ if(e.key==='Enter') document.getElementById('loginSenha').focus(); });
+document.getElementById('loginSenha').addEventListener('keydown',e=>{ if(e.key==='Enter') fazerLogin(); });
+
+function sair(){
+  usuarioAtual=null; allData={};
+  document.getElementById('loginWrap').style.display='flex';
+  document.getElementById('appWrap').style.display='none';
+  document.getElementById('loginNome').value='';
+  document.getElementById('loginSenha').value='';
+}
+
+// ── Carregar dados ──
+async function carregarDados(){
+  document.getElementById('content').innerHTML='<div class="loading">🔄 Carregando dados...</div>';
+  const snap = await db.ref('entregas').once('value');
+  allData = snap.val()||{};
+  renderPagina();
+}
+
+// ── Navegação ──
+function setPage(p){
+  paginaAtual=p;
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+  const navEl = document.getElementById('nav_'+p);
+  if(navEl) navEl.classList.add('active');
+  const titles={visao:'Visão geral',entregadores:'Entregadores',enderecos:'Endereços',historico:'Histórico',perfis:'Gestão de Perfis'};
+  document.getElementById('pageTitle').textContent=titles[p]||p;
+  renderPagina();
+}
+
+function renderPagina(){
+  if(paginaAtual==='visao')           renderVisao();
+  else if(paginaAtual==='entregadores') renderEntregadores();
+  else if(paginaAtual==='enderecos')    renderEnderecosEdit();
+  else if(paginaAtual==='historico')    renderHistorico();
+  else if(paginaAtual==='perfis')       renderPerfis();
+}
+
+// ── Pega entregas de um user (com aliases) ──
+function getEntregasUser(user){
+  const aliases = { 'Jonathas':['Jonathas','Entregador2'], 'Bruno':['Bruno'] };
+  const keys = aliases[user]||[user];
+  const result={};
+  keys.forEach(k=>{ if(allData[k]) Object.assign(result,allData[k]); });
+  return result;
+}
+
+function getTodasEntregas(){
+  // todas de todos os entregadores por dia
+  const dias={};
+  ENTREGADORES.forEach(u=>{
+    const userDias=getEntregasUser(u);
+    Object.entries(userDias).forEach(([dia,ents])=>{
+      if(!dias[dia]) dias[dia]={};
+      Object.values(ents).forEach(e=>{ if(e&&e.id) dias[dia][e.id]={...e,_user:u}; });
+    });
+  });
+  return dias;
+}
+
+// ── VISÃO GERAL ──
+function renderVisao(){
+  const todas=getTodasEntregas();
+  const inicio=inicioMesFiltro();
+  const diasFiltrados=Object.entries(todas).filter(([d])=>d>=inicio).sort(([a],[b])=>a.localeCompare(b));
+
+  let totalEntregas=0, totalTaxas=0;
+  const porDia={};
+  diasFiltrados.forEach(([dia,ents])=>{
+    const list=Object.values(ents);
+    totalEntregas+=list.length;
+    totalTaxas+=list.reduce((s,e)=>s+(e.taxa||0),0);
+    porDia[dia]=list.length;
+  });
+
+  // Endereços únicos
+  const endUnicos=new Set();
+  diasFiltrados.forEach(([,ents])=>Object.values(ents).forEach(e=>{ if(e.rua) endUnicos.add(semAcento(e.rua.trim())+'|'+(e.numero||'')); }));
+
+  // Hoje
+  const hj=hoje();
+  const todayEnts=todas[hj]||{};
+  const todayList=Object.values(todayEnts);
+
+  // Entregadores hoje
+  const entHoje={};
+  ENTREGADORES.forEach(u=>{
+    const userDias=getEntregasUser(u);
+    const hojeDia=userDias[hj]||{};
+    const list=Object.values(hojeDia);
+    entHoje[u]={lista:list,soma:list.reduce((s,e)=>s+(e.taxa||0),0)};
+  });
+  const totalHoje=Object.values(entHoje).reduce((s,e)=>s+e.soma,0);
+
+  // Top endereços
+  const endMap={};
+  diasFiltrados.forEach(([,ents])=>Object.values(ents).forEach(e=>{
+    if(!e.rua) return;
+    const k=semAcento(e.rua.trim())+'|'+(e.numero||'');
+    if(!endMap[k]) endMap[k]={rua:e.rua.trim(),numero:e.numero||'S/N',taxa:e.taxa||0,count:0};
+    endMap[k].count++;
+    endMap[k].taxa=e.taxa||endMap[k].taxa;
+  }));
+  const topEnd=Object.values(endMap).sort((a,b)=>b.count-a.count).slice(0,8);
+  const maxCount=topEnd[0]?.count||1;
+
+  // Últimos 14 dias pro gráfico
+  const ultimos14=[];
+  for(let i=13;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); const s=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; ultimos14.push({label:`${d.getDate()}/${d.getMonth()+1}`,dia:s,count:porDia[s]||0}); }
+
+  const colors=['rgba(96,165,250,0.6)','rgba(52,211,153,0.6)','rgba(129,140,248,0.6)'];
+  const avColors=['background:rgba(96,165,250,0.15);color:var(--accent)','background:rgba(52,211,153,0.15);color:var(--green)'];
+
+  document.getElementById('content').innerHTML=`
+    <div class="filters">
+      <button class="filter-btn ${filtroMeses===1?'active':''}" onclick="setFiltro(1)">Este mês</button>
+      <button class="filter-btn ${filtroMeses===3?'active':''}" onclick="setFiltro(3)">3 meses</button>
+      <button class="filter-btn ${filtroMeses===6?'active':''}" onclick="setFiltro(6)">6 meses</button>
+      <button class="filter-btn ${filtroMeses===12?'active':''}" onclick="setFiltro(12)">1 ano</button>
+    </div>
+
+    <div class="metrics">
+      <div class="metric">
+        <div class="metric-icon">📦</div>
+        <div class="metric-label">Total entregas</div>
+        <div class="metric-val">${totalEntregas}</div>
+        <div class="metric-sub" style="color:var(--text2)">no período</div>
+      </div>
+      <div class="metric">
+        <div class="metric-icon">💰</div>
+        <div class="metric-label">Total em taxas</div>
+        <div class="metric-val green">${fmt(totalTaxas)}</div>
+        <div class="metric-sub" style="color:var(--text2)">no período</div>
+      </div>
+      <div class="metric">
+        <div class="metric-icon">🛵</div>
+        <div class="metric-label">Entregadores</div>
+        <div class="metric-val">${ENTREGADORES.length}</div>
+        <div class="metric-sub" style="color:var(--text2)">${ENTREGADORES.join(' e ')}</div>
+      </div>
+      <div class="metric">
+        <div class="metric-icon">📍</div>
+        <div class="metric-label">Endereços únicos</div>
+        <div class="metric-val">${endUnicos.size}</div>
+        <div class="metric-sub" style="color:var(--text2)">no período</div>
+      </div>
+    </div>
+
+    <div class="grid3">
+      <div class="card">
+        <div class="card-title">Entregas por dia <span>Últimos 14 dias</span></div>
+        <div class="chart-wrap"><canvas id="chartDia"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Entregadores hoje</div>
+        ${ENTREGADORES.map((u,i)=>`
+          <div class="ent-row" style="cursor:pointer;" onclick="toggleHojeDetail('hoje_${u}')">
+            <div class="ent-avatar" style="${avColors[i]}">${u.substring(0,2).toUpperCase()}</div>
+            <div class="ent-info">
+              <div class="ent-name">${u}</div>
+              <div class="ent-detail">${entHoje[u]?.lista.length||0} entregas hoje</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div class="ent-taxa">${fmt(entHoje[u]?.soma||0)}</div>
+              <div style="color:var(--text2);" id="chv_hoje_${u}">›</div>
+            </div>
+          </div>
+          <div id="hoje_${u}" style="display:none;margin-bottom:6px;">
+            ${(entHoje[u]?.lista||[]).map((e,j)=>`
+              <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;
+                background:rgba(255,255,255,0.02);border-radius:8px;margin-bottom:3px;cursor:pointer;"
+                onclick="event.stopPropagation();abrirDetalhe(${JSON.stringify(e).replace(/"/g,'&quot;')},'${u}','${hj}')">
+                <div style="width:20px;height:20px;background:rgba(96,165,250,0.1);border-radius:5px;
+                  display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;
+                  color:var(--accent);flex-shrink:0;">${j+1}</div>
+                <div style="flex:1;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                  ${e.rua||''}, nº ${e.numero||''}</div>
+                <div style="font-size:12px;font-weight:700;color:var(--green);">${fmt(e.taxa||0)}</div>
+                <div style="font-size:11px;color:var(--text2);">✏️</div>
+              </div>`).join('')}
+          </div>`).join('')}
+        <div class="total-dia">
+          <div class="total-dia-label">Total hoje</div>
+          <div class="total-dia-val">${fmt(totalHoje)}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Top endereços mais pedidos <span>no período</span></div>
+      ${topEnd.map((e,i)=>`
+        <div class="end-row">
+          <div class="end-rank">${i+1}</div>
+          <div class="end-name">${e.rua}, nº ${e.numero}</div>
+          <div class="end-bar-wrap"><div class="end-bar" style="width:${Math.round(e.count/maxCount*100)}%"></div></div>
+          <div class="end-count">${e.count}x</div>
+          <div class="end-taxa">${fmt(e.taxa)}</div>
+        </div>`).join('')}
+    </div>
+  `;
+
+  // Gráfico
+  setTimeout(()=>{
+    const ctx=document.getElementById('chartDia');
+    if(!ctx) return;
+    if(chartInstance) chartInstance.destroy();
+    chartInstance=new Chart(ctx,{
+      type:'bar',
+      data:{
+        labels:ultimos14.map(d=>d.label),
+        datasets:[{
+          data:ultimos14.map(d=>d.count),
+          backgroundColor:ultimos14.map(d=>d.dia===hj?'rgba(52,211,153,0.7)':'rgba(96,165,250,0.5)'),
+          borderRadius:6,borderSkipped:false,
+        }]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{display:false},tooltip:{
+          backgroundColor:'rgba(8,13,30,0.95)',titleColor:'#f0f4ff',bodyColor:'#94a3b8',
+          borderColor:'rgba(255,255,255,0.1)',borderWidth:1,
+          callbacks:{label:ctx=>`${ctx.raw} entregas`}
+        }},
+        scales:{
+          x:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#94a3b8',font:{size:10}}},
+          y:{grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#94a3b8',font:{size:10}},beginAtZero:true}
+        }
+      }
+    });
+  },100);
+}
+
+function setFiltro(m){ filtroMeses=m; renderPagina(); }
+
+// ── MODAL DETALHE ENTREGA ──
+let _mdEntrega = null;
+
+function abrirDetalhe(entrega, user, dia){
+  _mdEntrega = { ...entrega, _user: user, _dia: dia };
+  document.getElementById('mdTitle').textContent = `Entrega #${entrega.id||''}`;
+  document.getElementById('mdSub').textContent = `${user} · ${fmtData(dia)} · ${fmtHora(entrega.ts||0)}`;
+  document.getElementById('mdRua').value    = entrega.rua||'';
+  document.getElementById('mdNumero').value = entrega.numero||'';
+  document.getElementById('mdTaxa').value   = entrega.taxa||'';
+  document.getElementById('modalDetalhe').classList.add('show');
+}
+
+function fecharModal(ev){
+  if(!ev || ev.target===document.getElementById('modalDetalhe'))
+    document.getElementById('modalDetalhe').classList.remove('show');
+}
+
+async function salvarEntrega(){
+  if(!_mdEntrega) return;
+  const novaRua   = document.getElementById('mdRua').value.trim();
+  const novoNum   = document.getElementById('mdNumero').value.trim();
+  const novaTaxa  = parseFloat(document.getElementById('mdTaxa').value);
+  if(!novaRua){ toast('⚠️ Digite a rua!'); return; }
+  if(isNaN(novaTaxa)){ toast('⚠️ Taxa inválida!'); return; }
+
+  const path = `entregas/${_mdEntrega._user}/${_mdEntrega._dia}/${_mdEntrega.id}`;
+  await db.ref(path).update({ rua: novaRua, numero: novoNum, taxa: novaTaxa });
+
+  toast('✓ Entrega atualizada!');
+  document.getElementById('modalDetalhe').classList.remove('show');
+  await carregarDados();
+}
+
+async function excluirEntrega(){
+  if(!_mdEntrega) return;
+  if(!confirm(`Excluir entrega em ${_mdEntrega.rua}?`)) return;
+  const path = `entregas/${_mdEntrega._user}/${_mdEntrega._dia}/${_mdEntrega.id}`;
+  await db.ref(path).remove();
+  toast('✓ Entrega excluída!');
+  document.getElementById('modalDetalhe').classList.remove('show');
+  await carregarDados();
+}
+
+// ── ENTREGADORES ──
+function renderEntregadores(){
+  const todas=getTodasEntregas();
+  const inicio=inicioMesFiltro();
+  const avColors=['background:rgba(96,165,250,0.15);color:var(--accent)','background:rgba(52,211,153,0.15);color:var(--green)'];
+
+  let html=`<div class="filters">
+    <button class="filter-btn ${filtroMeses===1?'active':''}" onclick="setFiltro(1)">Este mês</button>
+    <button class="filter-btn ${filtroMeses===3?'active':''}" onclick="setFiltro(3)">3 meses</button>
+    <button class="filter-btn ${filtroMeses===6?'active':''}" onclick="setFiltro(6)">6 meses</button>
+  </div>`;
+
+  html+=`<div class="grid2">`;
+  ENTREGADORES.forEach((u,i)=>{
+    const userDias=getEntregasUser(u);
+    const diasFilt=Object.entries(userDias).filter(([d])=>d>=inicio);
+    const todas_u=diasFilt.flatMap(([,ents])=>Object.values(ents));
+    const total=todas_u.length;
+    const soma=todas_u.reduce((s,e)=>s+(e.taxa||0),0);
+    const media=total>0?soma/total:0;
+    const hj=hoje();
+    const hoje_u=Object.values(userDias[hj]||{});
+    const hojeTotal=hoje_u.reduce((s,e)=>s+(e.taxa||0),0);
+
+    html+=`<div class="card">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+        <div class="ent-avatar" style="width:48px;height:48px;font-size:16px;${avColors[i]}">${u.substring(0,2).toUpperCase()}</div>
+        <div>
+          <div style="font-size:16px;font-weight:800;">${u}</div>
+          <div style="font-size:11px;color:var(--text2);">Entregador</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Entregas</div>
+          <div style="font-size:22px;font-weight:900;">${total}</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Total taxas</div>
+          <div style="font-size:18px;font-weight:900;color:var(--green);">${fmt(soma)}</div>
+        </div>
+        <div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Taxa média</div>
+          <div style="font-size:18px;font-weight:900;color:var(--accent);">${fmt(media)}</div>
+        </div>
+        <div style="background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.2);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Hoje</div>
+          <div style="font-size:18px;font-weight:900;color:var(--green);">${fmt(hojeTotal)}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text2);text-align:center;">${hoje_u.length} entregas hoje</div>
+    </div>`;
+  });
+  html+=`</div>`;
+  document.getElementById('content').innerHTML=html;
+}
+
+// ── ENDEREÇOS ──
+function renderEnderecos(){
+  const todas=getTodasEntregas();
+  const inicio=inicioMesFiltro();
+  const diasFilt=Object.entries(todas).filter(([d])=>d>=inicio);
+
+  const endMap={};
+  diasFilt.forEach(([,ents])=>Object.values(ents).forEach(e=>{
+    if(!e.rua) return;
+    const k=semAcento(e.rua.trim())+'|'+(e.numero||'');
+    if(!endMap[k]) endMap[k]={rua:e.rua.trim(),numero:e.numero||'S/N',taxa:e.taxa||0,count:0};
+    endMap[k].count++;
+    endMap[k].taxa=e.taxa||endMap[k].taxa;
+  }));
+
+  const sorted=Object.values(endMap).sort((a,b)=>b.count-a.count);
+  const maxCount=sorted[0]?.count||1;
+
+  document.getElementById('content').innerHTML=`
+    <div class="filters">
+      <button class="filter-btn ${filtroMeses===1?'active':''}" onclick="setFiltro(1)">Este mês</button>
+      <button class="filter-btn ${filtroMeses===3?'active':''}" onclick="setFiltro(3)">3 meses</button>
+      <button class="filter-btn ${filtroMeses===6?'active':''}" onclick="setFiltro(6)">6 meses</button>
+      <button class="filter-btn ${filtroMeses===12?'active':''}" onclick="setFiltro(12)">Todos</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Todos os endereços <span>${sorted.length} endereços</span></div>
+      <input type="text" id="buscaEnd" placeholder="Buscar endereço..."
+        oninput="filtrarEnd(this.value)"
+        style="width:100%;background:rgba(0,0,0,0.25);border:1.5px solid rgba(255,255,255,0.1);
+        border-radius:10px;padding:10px 13px;color:#f0f4ff;font-size:13px;
+        font-family:'Inter',sans-serif;outline:none;margin-bottom:14px;-webkit-appearance:none;" />
+      <div id="endList">
+        ${sorted.map((e,i)=>`
+          <div class="end-row">
+            <div class="end-rank">${i+1}</div>
+            <div class="end-name" style="font-size:13px;">${e.rua}, nº ${e.numero}</div>
+            <div class="end-bar-wrap" style="width:120px;"><div class="end-bar" style="width:${Math.round(e.count/maxCount*100)}%"></div></div>
+            <div class="end-count">${e.count}x</div>
+            <div class="end-taxa" style="width:60px;">${fmt(e.taxa)}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  window._endSorted=sorted;
+  window._endMax=maxCount;
+}
+
+function filtrarEnd(txt){
+  const q=semAcento(txt.trim());
+  const filtrados=q?window._endSorted.filter(e=>semAcento(e.rua).includes(q)||(e.numero+'').includes(q)):window._endSorted;
+  document.getElementById('endList').innerHTML=filtrados.map((e,i)=>`
+    <div class="end-row">
+      <div class="end-rank">${i+1}</div>
+      <div class="end-name" style="font-size:13px;">${e.rua}, nº ${e.numero}</div>
+      <div class="end-bar-wrap" style="width:120px;"><div class="end-bar" style="width:${Math.round(e.count/window._endMax*100)}%"></div></div>
+      <div class="end-count">${e.count}x</div>
+      <div class="end-taxa" style="width:60px;">${fmt(e.taxa)}</div>
+    </div>`).join('');
+}
+
+function toggleHojeDetail(id){
+  const el  = document.getElementById(id);
+  const user = id.replace('hoje_','');
+  const chv = document.getElementById(`chv_hoje_${user}`);
+  const aberto = el.style.display !== 'none';
+  el.style.display = aberto ? 'none' : 'block';
+  if(chv) chv.style.transform = aberto ? '' : 'rotate(90deg)';
+}
+
+function toggleDiaDetail(id){
+  const el  = document.getElementById(`detail_${id}`);
+  const chv = document.getElementById(`chev_${id}`);
+  const aberto = el.style.display !== 'none';
+  el.style.display  = aberto ? 'none' : 'block';
+  chv.style.transform = aberto ? '' : 'rotate(90deg)';
+}
+
+// ── PERFIS ──
+function renderPerfis(){
+  const TODOS = {
+    'adm':      { senha:'Macaco22', tipo:'adm',        emoji:'⚙️' },
+    'Bruno':    { senha:'Macaco22', tipo:'entregador',  emoji:'🛵' },
+    'Jonathas': { senha:'ent2',     tipo:'entregador',  emoji:'🛵' },
+    'Andre':    { senha:'adm2006',  tipo:'supervisor',  emoji:'👀' },
+  };
+
+  let html = '<div style="display:flex;flex-direction:column;gap:0;">';
+  Object.entries(TODOS).forEach(([user, info])=>{
+    html += `<div class="perfil-item">
+      <div class="perfil-header">
+        <div class="perfil-nome">${info.emoji} ${user}
+          <span class="perfil-badge ${info.tipo}">${info.tipo.toUpperCase()}</span>
+        </div>
+        <button class="btn-edit-sm" onclick="toggleEditSenha('${user}')">✏️ Editar senha</button>
+      </div>
+      <div class="perfil-info">
+        <div class="perfil-dado">Login: <span>${user}</span></div>
+        <div class="perfil-dado">Senha: <span id="senhaVal_${user}">••••••</span>
+          <button onclick="toggleVerSenha('${user}','${info.senha}')"
+            style="background:none;border:none;cursor:pointer;font-size:13px;margin-left:4px;color:var(--text2);">👁️</button>
+        </div>
+      </div>
+      <div class="edit-senha-form" id="formSenha_${user}">
+        <div class="edit-senha-row">
+          <input class="modal-input" type="text" id="inputSenha_${user}" placeholder="Nova senha" value="${info.senha}"
+            style="flex:1;" />
+          <button class="btn-save" style="padding:10px 16px;" onclick="salvarSenha('${user}')">✓ Salvar</button>
+          <button class="btn-cancel" style="padding:10px 12px;" onclick="toggleEditSenha('${user}')">✕</button>
+        </div>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  document.getElementById('content').innerHTML = html;
+}
+
+let _senhaVis = {};
+function toggleVerSenha(user, senha){
+  _senhaVis[user] = !_senhaVis[user];
+  document.getElementById(`senhaVal_${user}`).textContent = _senhaVis[user] ? senha : '••••••';
+}
+function toggleEditSenha(user){
+  const f = document.getElementById(`formSenha_${user}`);
+  f.style.display = f.style.display === 'none' || !f.style.display ? 'block' : 'none';
+}
+function salvarSenha(user){
+  const nova = document.getElementById(`inputSenha_${user}`).value.trim();
+  if(!nova){ toast('⚠️ Digite uma senha!'); return; }
+  USUARIOS[user] = USUARIOS[user] || {};
+  USUARIOS[user].senha = nova;
+  toast(`✓ Senha de ${user} atualizada!`);
+  toggleEditSenha(user);
+  renderPerfis();
+}
+
+// ── ENDEREÇOS EDITÁVEIS ──
+function renderEnderecosEdit(){
+  const todas = getTodasEntregas();
+  const endMap = {};
+  Object.values(todas).forEach(ents=>Object.values(ents).forEach(e=>{
+    if(!e.rua) return;
+    const k = semAcento(e.rua.trim())+'|'+(e.numero||'');
+    if(!endMap[k]) endMap[k]={rua:e.rua.trim(),numero:e.numero||'S/N',taxa:e.taxa||0,count:0};
+    endMap[k].count++;
+    endMap[k].taxa=e.taxa||endMap[k].taxa;
+  }));
+  const sorted = Object.values(endMap).sort((a,b)=>b.count-a.count);
+
+  let html = `
+    <div class="filters">
+      <button class="filter-btn active" style="cursor:default;">${sorted.length} endereços cadastrados</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Endereços <span>Clique em ✏️ para editar</span></div>
+      <input type="text" id="buscaEndEdit" placeholder="Buscar endereço..."
+        oninput="filtrarEndEdit(this.value)"
+        style="width:100%;background:rgba(0,0,0,0.25);border:1.5px solid rgba(255,255,255,0.1);
+        border-radius:10px;padding:10px 13px;color:#f0f4ff;font-size:13px;
+        font-family:'Inter',sans-serif;outline:none;margin-bottom:14px;-webkit-appearance:none;" />
+      <div id="endEditList">`;
+
+  sorted.forEach((e,i)=>{
+    html += `
+      <div style="border-bottom:1px solid rgba(255,255,255,0.05);padding:10px 0;" id="endEdit_${i}">
+        <!-- View -->
+        <div id="endView_${i}" style="display:flex;align-items:center;gap:10px;">
+          <div class="end-rank">${i+1}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:700;">${e.rua}, nº ${e.numero}</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px;">${e.count}x entregue · ${fmt(e.taxa)}</div>
+          </div>
+          <button onclick="abrirEditEnd(${i})"
+            style="background:rgba(96,165,250,0.12);color:var(--accent);border:1px solid rgba(96,165,250,0.2);
+            border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;
+            font-family:'Inter',sans-serif;cursor:pointer;">✏️</button>
+        </div>
+        <!-- Edit -->
+        <div id="endForm_${i}" style="display:none;margin-top:10px;padding:12px;
+          background:rgba(0,0,0,0.2);border-radius:10px;">
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-bottom:10px;">
+            <div>
+              <div class="modal-label">Rua</div>
+              <input class="modal-input" id="endRua_${i}" value="${e.rua}" style="font-size:12px;padding:8px;" />
+            </div>
+            <div>
+              <div class="modal-label">Número</div>
+              <input class="modal-input" id="endNum_${i}" value="${e.numero}" style="font-size:12px;padding:8px;" />
+            </div>
+            <div>
+              <div class="modal-label">Taxa</div>
+              <input class="modal-input" type="number" id="endTaxa_${i}" value="${e.taxa}" step="0.50" style="font-size:12px;padding:8px;" />
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button class="btn-cancel" style="padding:8px 14px;font-size:12px;" onclick="fecharEditEnd(${i})">Cancelar</button>
+            <button class="btn-save" style="padding:8px 14px;font-size:12px;" onclick="salvarEndEdit(${i},'${e.rua.replace(/'/g,"\\'")}','${e.numero}')">✓ Salvar</button>
+          </div>
+        </div>
+      </div>`;
+  });
+  html += '</div></div>';
+  document.getElementById('content').innerHTML = html;
+  window._endEditList = sorted;
+}
+
+function filtrarEndEdit(txt){
+  const q = semAcento(txt.trim());
+  document.querySelectorAll('[id^="endEdit_"]').forEach(el=>{
+    const nome = el.querySelector('div[style*="font-size:13px"]')?.textContent||'';
+    el.style.display = !q || semAcento(nome).includes(q) ? '' : 'none';
+  });
+}
+function abrirEditEnd(i){
+  document.getElementById(`endView_${i}`).style.display='none';
+  document.getElementById(`endForm_${i}`).style.display='block';
+}
+function fecharEditEnd(i){
+  document.getElementById(`endView_${i}`).style.display='flex';
+  document.getElementById(`endForm_${i}`).style.display='none';
+}
+async function salvarEndEdit(i, ruaAntiga, numAntigo){
+  const novaRua  = document.getElementById(`endRua_${i}`).value.trim();
+  const novoNum  = document.getElementById(`endNum_${i}`).value.trim();
+  const novaTaxa = parseFloat(document.getElementById(`endTaxa_${i}`).value);
+  if(!novaRua||isNaN(novaTaxa)){ toast('⚠️ Preencha todos os campos!'); return; }
+
+  toast('⏳ Atualizando...');
+  const snap = await db.ref('entregas').once('value');
+  const allD = snap.val()||{};
+  const updates = {};
+  Object.entries(allD).forEach(([user,dias])=>{
+    Object.entries(dias).forEach(([dia,ents])=>{
+      Object.entries(ents).forEach(([id,e])=>{
+        if(!e||!e.rua) return;
+        if(semAcento(e.rua.trim())===semAcento(ruaAntiga.trim()) && (e.numero||'').trim()===numAntigo.trim()){
+          updates[`entregas/${user}/${dia}/${id}/rua`]    = novaRua;
+          updates[`entregas/${user}/${dia}/${id}/numero`] = novoNum||e.numero;
+          updates[`entregas/${user}/${dia}/${id}/taxa`]   = novaTaxa;
+        }
+      });
+    });
+  });
+  if(Object.keys(updates).length){
+    await db.ref().update(updates);
+    toast(`✓ ${Object.keys(updates).length/3} entregas atualizadas!`);
+  } else {
+    toast('Nenhuma entrega encontrada.');
+  }
+  await carregarDados();
+  renderEnderecosEdit();
+}
+
+// ── HISTÓRICO ──
+function renderHistorico(){
+  const todas=getTodasEntregas();
+  const inicio=inicioMesFiltro();
+  const dias=Object.entries(todas)
+    .filter(([d])=>d>=inicio && d!==hoje())
+    .sort(([a],[b])=>b.localeCompare(a));
+
+  if(!dias.length){
+    document.getElementById('content').innerHTML=`
+      <div class="card" style="text-align:center;padding:48px;">
+        <div style="font-size:40px;margin-bottom:12px;opacity:0.4;">📅</div>
+        <div style="color:var(--text2);font-size:14px;">Nenhum histórico no período</div>
+      </div>`;
+    return;
+  }
+
+  let html=`<div class="filters">
+    <button class="filter-btn ${filtroMeses===1?'active':''}" onclick="setFiltro(1)">Este mês</button>
+    <button class="filter-btn ${filtroMeses===3?'active':''}" onclick="setFiltro(3)">3 meses</button>
+    <button class="filter-btn ${filtroMeses===6?'active':''}" onclick="setFiltro(6)">6 meses</button>
+  </div><div class="card"><div class="card-title">Histórico de dias</div>`;
+
+  dias.forEach(([dia,ents])=>{
+    const lista=Object.values(ents);
+    const total=lista.reduce((s,e)=>s+(e.taxa||0),0);
+    const porUser={};
+    lista.forEach(e=>{ if(!porUser[e._user]) porUser[e._user]=0; porUser[e._user]+=(e.taxa||0); });
+    const resumo=Object.entries(porUser).map(([u,t])=>`${u}: ${fmt(t)}`).join(' · ');
+    const diaId = dia.replace(/-/g,'_');
+
+    html+=`<div class="hist-row" onclick="toggleDiaDetail('${diaId}')">
+      <div>
+        <div class="hist-date">${fmtData(dia)}</div>
+        <div class="hist-info">${lista.length} entregas · ${resumo}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="hist-total">${fmt(total)}</div>
+        <div style="color:var(--text2);font-size:18px;" id="chev_${diaId}">›</div>
+      </div>
+    </div>
+    <div id="detail_${diaId}" style="display:none;padding:8px 0 12px;">
+      ${lista.sort((a,b)=>a.ts-b.ts).map((e,i)=>`
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;
+          background:rgba(255,255,255,0.02);border-radius:8px;margin-bottom:4px;cursor:pointer;"
+          onclick="event.stopPropagation();abrirDetalhe(${JSON.stringify(e).replace(/"/g,'&quot;')},'${e._user}','${dia}')">
+          <div style="width:24px;height:24px;background:rgba(96,165,250,0.1);border-radius:6px;
+            display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;
+            color:var(--accent);flex-shrink:0;">${i+1}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              ${e.rua||''}, nº ${e.numero||''}</div>
+            <div style="font-size:10px;color:var(--text2);">${e._user} · ${fmtHora(e.ts||0)}</div>
+          </div>
+          <div style="font-size:13px;font-weight:800;color:var(--green);">${fmt(e.taxa||0)}</div>
+          <div style="font-size:12px;color:var(--text2);">✏️</div>
+        </div>`).join('')}
+    </div>`;
+  });
+
+  html+=`</div>`;
+  document.getElementById('content').innerHTML=html;
+}
+</script>
+
+<!-- MODAL DETALHE ENTREGA -->
+<div class="modal-bg" id="modalDetalhe" onclick="fecharModal(event)">
+  <div class="modal-box">
+    <div class="modal-title" id="mdTitle">Entrega</div>
+    <div class="modal-sub" id="mdSub"></div>
+    <div class="modal-field">
+      <div class="modal-label">Rua / Avenida</div>
+      <input class="modal-input" type="text" id="mdRua" />
+    </div>
+    <div class="modal-row">
+      <div class="modal-field">
+        <div class="modal-label">Número</div>
+        <input class="modal-input" type="text" id="mdNumero" />
+      </div>
+      <div class="modal-field">
+        <div class="modal-label">Taxa (R$)</div>
+        <input class="modal-input" type="number" id="mdTaxa" step="0.50" min="0" />
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-delete" onclick="excluirEntrega()">🗑 Excluir</button>
+      <button class="btn-cancel" onclick="fecharModal()">Cancelar</button>
+      <button class="btn-save" onclick="salvarEntrega()">✓ Salvar</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

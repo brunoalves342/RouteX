@@ -962,7 +962,6 @@ function mostrarSugestoes(texto){
       '<span class="ac-hl">$1</span>');
     const ruaSafe = e.rua.replace(/'/g,"\\'").replace(/"/g,'&quot;');
     return `<div class="autocomplete-item"
-      ontouchend="selecionarEndereco('${ruaSafe}','${e.numero}',${e.taxa})"
       onclick="selecionarEndereco('${ruaSafe}','${e.numero}',${e.taxa})">
       <div class="ac-rua">${hl}, nº ${e.numero}</div>
       <div class="ac-info">Taxa: <span class="ac-taxa">${fmt(e.taxa)}</span> · ${e.count}x entregue</div>
@@ -970,6 +969,16 @@ function mostrarSugestoes(texto){
   }).join('');
 
   el.style.display = 'block';
+
+  // Detecta rolagem — se rolou, não seleciona ao levantar o dedo
+  let touchStartY = 0;
+  let scrollou    = false;
+  el.ontouchstart = ev => { touchStartY = ev.touches[0].clientY; scrollou = false; };
+  el.ontouchmove  = ev => { if(Math.abs(ev.touches[0].clientY - touchStartY) > 8) scrollou = true; };
+  el.ontouchend   = ev => {
+    if(scrollou) { ev.preventDefault(); return; }
+    // Se não rolou, deixa o onclick disparar normalmente
+  };
 }
 
 function selecionarEndereco(rua, numero, taxa){
@@ -990,8 +999,14 @@ document.getElementById('inputTaxa').addEventListener('input', function(){
   document.getElementById('taxaPreview').textContent = (!isNaN(v)&&v>0) ? '→ '+fmt(v) : '';
 });
 
-// Listeners do inputRua
+// Listeners do inputRua — remove acentos em tempo real
 document.getElementById('inputRua').addEventListener('input', function(){
+  const semAc = this.value.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  if(semAc !== this.value){
+    const pos = this.selectionStart - (this.value.length - semAc.length);
+    this.value = semAc;
+    this.setSelectionRange(pos, pos);
+  }
   mostrarSugestoes(this.value.trim());
 });
 document.getElementById('inputRua').addEventListener('blur', fecharSugestoes);
@@ -1007,10 +1022,12 @@ function adicionarEntrega(){
   const taxa = parseFloat(taxaRaw);
   if(!taxaRaw||isNaN(taxa)||taxa<0){ toast('⚠️ Taxa inválida!'); document.getElementById('inputTaxa').focus(); return; }
 
-  // Normaliza a rua antes de salvar
-  const ruaNorm = rua.match(/^(rua|av|avenida|alameda|travessa|praça)/i)
-    ? rua.trim()
-    : 'Rua ' + normalizarRua(rua);
+  // Remove acentos e normaliza a rua antes de salvar
+  const removerAcentos = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const ruaSemAc = removerAcentos(rua.trim());
+  const ruaNorm = ruaSemAc.match(/^(rua|av|avenida|alameda|travessa|praca)/i)
+    ? ruaSemAc
+    : 'Rua ' + normalizarRua(ruaSemAc);
 
   const id  = Date.now();
   const ent = { id, rua: ruaNorm, numero: numero||'S/N', taxa, ts: id, user: usuarioAtual };

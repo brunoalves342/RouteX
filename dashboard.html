@@ -498,13 +498,14 @@ function renderVisao(){
   const topEnd=Object.values(endMap).sort((a,b)=>b.count-a.count).slice(0,10);
   const maxCount=topEnd[0]?.count||1;
 
-  // Dias do mês atual (dia 1 ao dia de hoje)
+  // Dias do mês atual — sempre dia 1 ao 31
   const hoje_ = new Date();
   const ano_  = hoje_.getFullYear();
   const mes_  = hoje_.getMonth();
   const ultimos14 = [];
-  for(let i=1; i<=hoje_.getDate(); i++){
+  for(let i=1; i<=31; i++){
     const d = new Date(ano_, mes_, i);
+    if(d.getMonth() !== mes_) break; // para quando passa pro mês seguinte
     const s = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     ultimos14.push({label:`${i}`, dia:s, count:porDia[s]||0});
   }
@@ -542,51 +543,59 @@ function renderVisao(){
       </div>`).join('')}
     </div>
 
-    <!-- GRÁFICO + ENTREGADORES HOJE LADO A LADO -->
-    <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px;">
-
-      <!-- Gráfico -->
-      <div class="card">
-        <div class="card-title">Entregas por dia <span>${nomeMesAtual} ${new Date().getFullYear()}</span></div>
-        <div style="position:relative;height:140px;">
-          <canvas id="chartDia"></canvas>
-        </div>
+    <!-- GRÁFICO (largura total) -->
+    <div class="card" style="margin-bottom:14px;">
+      <div class="card-title">Entregas por dia <span>${nomeMesAtual} ${new Date().getFullYear()}</span></div>
+      <div style="position:relative;height:140px;">
+        <canvas id="chartDia"></canvas>
       </div>
+    </div>
+
+    <!-- ENTREGADORES HOJE + TOP 10 LADO A LADO -->
+    <div style="display:grid;grid-template-columns:300px 1fr;gap:14px;">
 
       <!-- Entregadores hoje -->
       <div class="card">
         <div class="card-title">Entregadores hoje</div>
         ${ENTREGADORES.map((u,i)=>`
-          <div style="display:flex;align-items:center;justify-content:space-between;
-            padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
-            <div style="display:flex;align-items:center;gap:8px;">
-              <div style="width:30px;height:30px;border-radius:8px;font-size:11px;font-weight:800;
-                display:flex;align-items:center;justify-content:center;
-                ${i===0?'background:rgba(96,165,250,0.15);color:#60a5fa':'background:rgba(52,211,153,0.15);color:#34d399'}">
-                ${u.substring(0,2).toUpperCase()}</div>
-              <div>
-                <div style="font-size:12px;font-weight:700;">${u}</div>
-                <div style="font-size:10px;color:var(--text2);">${entHoje[u]?.lista.length||0} entregas</div>
-              </div>
+          <div class="ent-row" style="cursor:pointer;" onclick="toggleHojeDetail('hoje_${u}')">
+            <div class="ent-avatar" style="${avColors[i]}">${u.substring(0,2).toUpperCase()}</div>
+            <div class="ent-info">
+              <div class="ent-name">${u}</div>
+              <div class="ent-detail">${entHoje[u]?.lista.length||0} entregas hoje</div>
             </div>
-            <div style="font-size:13px;font-weight:800;color:var(--green);">${fmt(entHoje[u]?.soma||0)}</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div class="ent-taxa">${fmt(entHoje[u]?.soma||0)}</div>
+              <div style="color:var(--text2);" id="chv_hoje_${u}">›</div>
+            </div>
+          </div>
+          <div id="hoje_${u}" style="display:none;margin-bottom:6px;">
+            ${(entHoje[u]?.lista||[]).map((e,j)=>`
+              <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;
+                background:rgba(255,255,255,0.02);border-radius:8px;margin-bottom:3px;cursor:pointer;"
+                onclick="event.stopPropagation();abrirDetalhe(${JSON.stringify(e).replace(/"/g,'&quot;')},'${u}','${hj}')">
+                <div style="width:18px;height:18px;background:rgba(96,165,250,0.1);border-radius:5px;
+                  display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;
+                  color:var(--accent);flex-shrink:0;">${j+1}</div>
+                <div style="flex:1;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                  ${e.rua||''}, nº ${e.numero||''}</div>
+                <div style="font-size:12px;font-weight:700;color:var(--green);">${fmt(e.taxa||0)}</div>
+                <div style="font-size:11px;color:var(--text2);">✏️</div>
+              </div>`).join('')}
           </div>`).join('')}
-        <div style="display:flex;justify-content:space-between;align-items:center;
-          margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.07);">
-          <span style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;">Total hoje</span>
-          <span style="font-size:16px;font-weight:900;color:var(--green);">${fmt(totalHoje)}</span>
+        <div class="total-dia">
+          <div class="total-dia-label">Total hoje</div>
+          <div class="total-dia-val">${fmt(totalHoje)}</div>
         </div>
       </div>
-    </div>
 
-    <!-- TOP 10 ENDEREÇOS -->
-    <div class="card">
-      <div class="card-title">Top 10 endereços <span>no período</span></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;">
+      <!-- Top 10 endereços — lista única -->
+      <div class="card">
+        <div class="card-title">Top 10 endereços <span>no período</span></div>
         ${topEnd.map((e,i)=>`
-          <div style="display:flex;align-items:center;gap:8px;padding:6px 0;
+          <div style="display:flex;align-items:center;gap:10px;padding:7px 0;
             border-bottom:1px solid rgba(255,255,255,0.04);">
-            <div style="width:18px;height:18px;border-radius:5px;background:rgba(96,165,250,0.1);
+            <div style="width:20px;height:20px;border-radius:5px;background:rgba(96,165,250,0.1);
               display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;
               color:var(--accent);flex-shrink:0;">${i+1}</div>
             <div style="flex:1;min-width:0;">
@@ -597,9 +606,9 @@ function renderVisao(){
                   background:linear-gradient(90deg,#3b6ef0,#818cf8);"></div>
               </div>
             </div>
-            <div style="display:flex;gap:6px;flex-shrink:0;align-items:center;">
-              <span style="font-size:10px;color:var(--text2);">${e.count}x</span>
-              <span style="font-size:11px;font-weight:800;color:var(--green);min-width:44px;text-align:right;">${fmt(e.taxa)}</span>
+            <div style="display:flex;gap:8px;flex-shrink:0;align-items:center;">
+              <span style="font-size:11px;color:var(--text2);">${e.count}x</span>
+              <span style="font-size:12px;font-weight:800;color:var(--green);min-width:48px;text-align:right;">${fmt(e.taxa)}</span>
             </div>
           </div>`).join('')}
       </div>

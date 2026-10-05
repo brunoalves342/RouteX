@@ -498,55 +498,62 @@ function renderVisao(){
   const topEnd=Object.values(endMap).sort((a,b)=>b.count-a.count).slice(0,10);
   const maxCount=topEnd[0]?.count||1;
 
-  // Últimos 14 dias pro gráfico
-  const ultimos14=[];
-  for(let i=13;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); const s=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; ultimos14.push({label:`${d.getDate()}/${d.getMonth()+1}`,dia:s,count:porDia[s]||0}); }
+  // Dias do mês atual (dia 1 ao dia de hoje)
+  const hoje_ = new Date();
+  const ano_  = hoje_.getFullYear();
+  const mes_  = hoje_.getMonth();
+  const ultimos14 = [];
+  for(let i=1; i<=hoje_.getDate(); i++){
+    const d = new Date(ano_, mes_, i);
+    const s = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    ultimos14.push({label:`${i}`, dia:s, count:porDia[s]||0});
+  }
 
   const colors=['rgba(96,165,250,0.6)','rgba(52,211,153,0.6)','rgba(129,140,248,0.6)'];
   const avColors=['background:rgba(96,165,250,0.15);color:var(--accent)','background:rgba(52,211,153,0.15);color:var(--green)'];
 
+  const nomeMesAtual=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][new Date().getMonth()];
+
   document.getElementById('content').innerHTML=`
-    <div class="filters">
+    <div class="filters" style="margin-bottom:14px;">
       <button class="filter-btn ${filtroMeses===1?'active':''}" onclick="setFiltro(1)">Este mês</button>
       <button class="filter-btn ${filtroMeses===3?'active':''}" onclick="setFiltro(3)">3 meses</button>
       <button class="filter-btn ${filtroMeses===6?'active':''}" onclick="setFiltro(6)">6 meses</button>
       <button class="filter-btn ${filtroMeses===12?'active':''}" onclick="setFiltro(12)">1 ano</button>
     </div>
 
-    <div class="metrics">
-      <div class="metric">
-        <div class="metric-icon">📦</div>
-        <div class="metric-label">Total entregas</div>
-        <div class="metric-val">${totalEntregas}</div>
-        <div class="metric-sub" style="color:var(--text2)">no período</div>
-      </div>
-      <div class="metric">
-        <div class="metric-icon">💰</div>
-        <div class="metric-label">Total em taxas</div>
-        <div class="metric-val green">${fmt(totalTaxas)}</div>
-        <div class="metric-sub" style="color:var(--text2)">no período</div>
-      </div>
-      <div class="metric">
-        <div class="metric-icon">🛵</div>
-        <div class="metric-label">Entregadores</div>
-        <div class="metric-val">${ENTREGADORES.length}</div>
-        <div class="metric-sub" style="color:var(--text2)">${ENTREGADORES.join(' e ')}</div>
-      </div>
-      <div class="metric">
-        <div class="metric-icon">📍</div>
-        <div class="metric-label">Endereços únicos</div>
-        <div class="metric-val">${endUnicos.size}</div>
-        <div class="metric-sub" style="color:var(--text2)">no período</div>
+    <!-- MÉTRICAS COMPACTAS -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;">
+      ${[
+        {icon:'📦',label:'Total entregas',val:totalEntregas,cor:'var(--text)',sub:'no período'},
+        {icon:'💰',label:'Total taxas',val:fmt(totalTaxas),cor:'var(--green)',sub:'no período'},
+        {icon:'🛵',label:'Entregadores',val:ENTREGADORES.length,cor:'var(--text)',sub:ENTREGADORES.join(' e ')},
+        {icon:'📍',label:'Endereços únicos',val:endUnicos.size,cor:'var(--accent)',sub:'no período'},
+      ].map(m=>`
+      <div style="background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;
+        padding:12px 14px;display:flex;align-items:center;gap:12px;">
+        <div style="font-size:22px;flex-shrink:0;">${m.icon}</div>
+        <div style="min-width:0;">
+          <div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;
+            letter-spacing:0.5px;margin-bottom:3px;">${m.label}</div>
+          <div style="font-size:20px;font-weight:900;color:${m.cor};letter-spacing:-0.5px;line-height:1;">${m.val}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.sub}</div>
+        </div>
+      </div>`).join('')}
+    </div>
+
+    <!-- GRÁFICO DO MÊS (largura total) -->
+    <div class="card" style="margin-bottom:14px;">
+      <div class="card-title">Entregas por dia <span>${nomeMesAtual} ${new Date().getFullYear()}</span></div>
+      <div style="position:relative;height:160px;">
+        <canvas id="chartDia"></canvas>
       </div>
     </div>
 
-    <div class="grid3">
-      <div class="card">
-        <div class="card-title">Entregas por dia <span>Últimos 14 dias</span></div>
-        <div style="position:relative;height:180px;">
-          <canvas id="chartDia"></canvas>
-        </div>
-      </div>
+    <!-- ENTREGADORES HOJE + TOP 10 LADO A LADO -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+
+      <!-- Entregadores hoje -->
       <div class="card">
         <div class="card-title">Entregadores hoje</div>
         ${ENTREGADORES.map((u,i)=>`
@@ -566,8 +573,8 @@ function renderVisao(){
               <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;
                 background:rgba(255,255,255,0.02);border-radius:8px;margin-bottom:3px;cursor:pointer;"
                 onclick="event.stopPropagation();abrirDetalhe(${JSON.stringify(e).replace(/"/g,'&quot;')},'${u}','${hj}')">
-                <div style="width:20px;height:20px;background:rgba(96,165,250,0.1);border-radius:5px;
-                  display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;
+                <div style="width:18px;height:18px;background:rgba(96,165,250,0.1);border-radius:5px;
+                  display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;
                   color:var(--accent);flex-shrink:0;">${j+1}</div>
                 <div style="flex:1;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                   ${e.rua||''}, nº ${e.numero||''}</div>
@@ -580,29 +587,31 @@ function renderVisao(){
           <div class="total-dia-val">${fmt(totalHoje)}</div>
         </div>
       </div>
-    </div>
 
-    <div class="card">
-      <div class="card-title">Top 10 endereços mais pedidos <span>no período</span></div>
-      ${topEnd.map((e,i)=>`
-        <div style="display:flex;align-items:center;gap:10px;padding:7px 0;
-          border-bottom:1px solid rgba(255,255,255,0.05);">
-          <div style="width:22px;height:22px;border-radius:6px;background:rgba(96,165,250,0.1);
-            display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;
-            color:var(--accent);flex-shrink:0;">${i+1}</div>
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-              color:var(--text);">${e.rua}, nº ${e.numero}</div>
-            <div style="height:3px;background:rgba(255,255,255,0.06);border-radius:2px;margin-top:4px;">
-              <div style="height:100%;border-radius:2px;width:${Math.round(e.count/maxCount*100)}%;
-                background:linear-gradient(90deg,#3b6ef0,#818cf8);"></div>
+      <!-- Top 10 endereços -->
+      <div class="card">
+        <div class="card-title">Top 10 endereços <span>no período</span></div>
+        ${topEnd.map((e,i)=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 0;
+            border-bottom:1px solid rgba(255,255,255,0.04);">
+            <div style="width:20px;height:20px;border-radius:5px;background:rgba(96,165,250,0.1);
+              display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;
+              color:var(--accent);flex-shrink:0;">${i+1}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;
+                text-overflow:ellipsis;color:var(--text);">${e.rua}, nº ${e.numero}</div>
+              <div style="height:3px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:3px;">
+                <div style="height:100%;border-radius:2px;width:${Math.round(e.count/maxCount*100)}%;
+                  background:linear-gradient(90deg,#3b6ef0,#818cf8);"></div>
+              </div>
             </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
-            <div style="font-size:11px;font-weight:700;color:var(--text2);">${e.count}x</div>
-            <div style="font-size:12px;font-weight:800;color:var(--green);min-width:52px;text-align:right;">${fmt(e.taxa)}</div>
-          </div>
-        </div>`).join('')}
+            <div style="display:flex;gap:8px;flex-shrink:0;align-items:center;">
+              <div style="font-size:11px;color:var(--text2);">${e.count}x</div>
+              <div style="font-size:12px;font-weight:800;color:var(--green);min-width:48px;text-align:right;">${fmt(e.taxa)}</div>
+            </div>
+          </div>`).join('')}
+      </div>
+
     </div>
   `;
 
@@ -645,11 +654,16 @@ function renderVisao(){
         scales:{
           x:{
             grid:{display:false},
-            ticks:{color:'#94a3b8',font:{size:10},maxRotation:0}
+            ticks:{
+              color:'#94a3b8',
+              font:{size:9},
+              maxRotation:0,
+              callback:(val,i)=> (i%2===0||ultimos14.length<=15) ? ultimos14[i]?.label : ''
+            }
           },
           y:{
             grid:{color:'rgba(255,255,255,0.04)'},
-            ticks:{color:'#94a3b8',font:{size:10},stepSize:5},
+            ticks:{color:'#94a3b8',font:{size:9},stepSize:5},
             beginAtZero:true
           }
         }

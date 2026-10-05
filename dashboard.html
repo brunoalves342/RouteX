@@ -542,76 +542,67 @@ function renderVisao(){
       </div>`).join('')}
     </div>
 
-    <!-- GRÁFICO DO MÊS (largura total) -->
-    <div class="card" style="margin-bottom:14px;">
-      <div class="card-title">Entregas por dia <span>${nomeMesAtual} ${new Date().getFullYear()}</span></div>
-      <div style="position:relative;height:160px;">
-        <canvas id="chartDia"></canvas>
-      </div>
-    </div>
+    <!-- GRÁFICO + ENTREGADORES HOJE LADO A LADO -->
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px;">
 
-    <!-- ENTREGADORES HOJE + TOP 10 LADO A LADO -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <!-- Gráfico -->
+      <div class="card">
+        <div class="card-title">Entregas por dia <span>${nomeMesAtual} ${new Date().getFullYear()}</span></div>
+        <div style="position:relative;height:140px;">
+          <canvas id="chartDia"></canvas>
+        </div>
+      </div>
 
       <!-- Entregadores hoje -->
       <div class="card">
         <div class="card-title">Entregadores hoje</div>
         ${ENTREGADORES.map((u,i)=>`
-          <div class="ent-row" style="cursor:pointer;" onclick="toggleHojeDetail('hoje_${u}')">
-            <div class="ent-avatar" style="${avColors[i]}">${u.substring(0,2).toUpperCase()}</div>
-            <div class="ent-info">
-              <div class="ent-name">${u}</div>
-              <div class="ent-detail">${entHoje[u]?.lista.length||0} entregas hoje</div>
-            </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;
+            padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
             <div style="display:flex;align-items:center;gap:8px;">
-              <div class="ent-taxa">${fmt(entHoje[u]?.soma||0)}</div>
-              <div style="color:var(--text2);" id="chv_hoje_${u}">›</div>
+              <div style="width:30px;height:30px;border-radius:8px;font-size:11px;font-weight:800;
+                display:flex;align-items:center;justify-content:center;
+                ${i===0?'background:rgba(96,165,250,0.15);color:#60a5fa':'background:rgba(52,211,153,0.15);color:#34d399'}">
+                ${u.substring(0,2).toUpperCase()}</div>
+              <div>
+                <div style="font-size:12px;font-weight:700;">${u}</div>
+                <div style="font-size:10px;color:var(--text2);">${entHoje[u]?.lista.length||0} entregas</div>
+              </div>
             </div>
-          </div>
-          <div id="hoje_${u}" style="display:none;margin-bottom:6px;">
-            ${(entHoje[u]?.lista||[]).map((e,j)=>`
-              <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;
-                background:rgba(255,255,255,0.02);border-radius:8px;margin-bottom:3px;cursor:pointer;"
-                onclick="event.stopPropagation();abrirDetalhe(${JSON.stringify(e).replace(/"/g,'&quot;')},'${u}','${hj}')">
-                <div style="width:18px;height:18px;background:rgba(96,165,250,0.1);border-radius:5px;
-                  display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;
-                  color:var(--accent);flex-shrink:0;">${j+1}</div>
-                <div style="flex:1;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                  ${e.rua||''}, nº ${e.numero||''}</div>
-                <div style="font-size:12px;font-weight:700;color:var(--green);">${fmt(e.taxa||0)}</div>
-                <div style="font-size:11px;color:var(--text2);">✏️</div>
-              </div>`).join('')}
+            <div style="font-size:13px;font-weight:800;color:var(--green);">${fmt(entHoje[u]?.soma||0)}</div>
           </div>`).join('')}
-        <div class="total-dia">
-          <div class="total-dia-label">Total hoje</div>
-          <div class="total-dia-val">${fmt(totalHoje)}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;
+          margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.07);">
+          <span style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;">Total hoje</span>
+          <span style="font-size:16px;font-weight:900;color:var(--green);">${fmt(totalHoje)}</span>
         </div>
       </div>
+    </div>
 
-      <!-- Top 10 endereços -->
-      <div class="card">
-        <div class="card-title">Top 10 endereços <span>no período</span></div>
+    <!-- TOP 10 ENDEREÇOS -->
+    <div class="card">
+      <div class="card-title">Top 10 endereços <span>no período</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;">
         ${topEnd.map((e,i)=>`
           <div style="display:flex;align-items:center;gap:8px;padding:6px 0;
             border-bottom:1px solid rgba(255,255,255,0.04);">
-            <div style="width:20px;height:20px;border-radius:5px;background:rgba(96,165,250,0.1);
+            <div style="width:18px;height:18px;border-radius:5px;background:rgba(96,165,250,0.1);
               display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;
               color:var(--accent);flex-shrink:0;">${i+1}</div>
             <div style="flex:1;min-width:0;">
               <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;
-                text-overflow:ellipsis;color:var(--text);">${e.rua}, nº ${e.numero}</div>
+                text-overflow:ellipsis;">${e.rua}, nº ${e.numero}</div>
               <div style="height:3px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:3px;">
                 <div style="height:100%;border-radius:2px;width:${Math.round(e.count/maxCount*100)}%;
                   background:linear-gradient(90deg,#3b6ef0,#818cf8);"></div>
               </div>
             </div>
-            <div style="display:flex;gap:8px;flex-shrink:0;align-items:center;">
-              <div style="font-size:11px;color:var(--text2);">${e.count}x</div>
-              <div style="font-size:12px;font-weight:800;color:var(--green);min-width:48px;text-align:right;">${fmt(e.taxa)}</div>
+            <div style="display:flex;gap:6px;flex-shrink:0;align-items:center;">
+              <span style="font-size:10px;color:var(--text2);">${e.count}x</span>
+              <span style="font-size:11px;font-weight:800;color:var(--green);min-width:44px;text-align:right;">${fmt(e.taxa)}</span>
             </div>
           </div>`).join('')}
       </div>
-
     </div>
   `;
 
@@ -626,11 +617,10 @@ function renderVisao(){
         labels:ultimos14.map(d=>d.label),
         datasets:[{
           data:ultimos14.map(d=>d.count),
-          backgroundColor:ultimos14.map(d=>d.dia===hj?'rgba(52,211,153,0.75)':'rgba(96,165,250,0.6)'),
-          borderRadius:5,
+          backgroundColor:ultimos14.map(d=>d.dia===hj?'rgba(52,211,153,0.8)':'rgba(96,165,250,0.55)'),
+          borderRadius:3,
           borderSkipped:false,
-          borderColor:ultimos14.map(d=>d.dia===hj?'rgba(52,211,153,1)':'rgba(96,165,250,0.8)'),
-          borderWidth:0,
+          maxBarThickness:18,
         }]
       },
       options:{

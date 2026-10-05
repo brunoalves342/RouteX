@@ -780,20 +780,22 @@ function renderEntregadores(){
         <div style="background:rgba(255,255,255,0.02);border-radius:12px;padding:14px;">
           <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;
             letter-spacing:0.5px;margin-bottom:12px;">Entregas — últimos 14 dias</div>
-          <div style="display:flex;align-items:flex-end;gap:4px;height:60px;">
+          <div style="display:flex;align-items:flex-end;gap:3px;height:64px;padding-bottom:2px;">
             ${chartData.map((v,i)=>{
-              const h=chartMax>0?Math.round(v/chartMax*100):0;
-              const isHoje=ultimos14[i].dia===hj;
-              return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;">
-                <div style="width:100%;border-radius:3px 3px 0 0;height:${h}%;min-height:${v>0?'4px':'0'};
-                  background:${isHoje?'var(--green)':'linear-gradient(180deg,'+avGrad[idx]+')'};opacity:${v>0?1:0.15};
-                  transition:height 0.3s;"></div>
-              </div>`;
+              const pct = chartMax>0 ? Math.max(Math.round(v/chartMax*100), v>0?6:0) : 0;
+              const isHoje = ultimos14[i].dia===hj;
+              const cor = isHoje ? '#34d399' : `url(#grad${idx})`;
+              return `<div title="${ultimos14[i].label}: ${v} entregas"
+                style="flex:1;border-radius:3px 3px 0 0;
+                height:${pct}%;
+                background:${isHoje?'#34d399':'linear-gradient(180deg,'+avGrad[idx]+')'};
+                opacity:${v>0?1:0.12};
+                transition:height 0.3s;min-height:0;"></div>`;
             }).join('')}
           </div>
-          <div style="display:flex;justify-content:space-between;margin-top:6px;">
+          <div style="display:flex;justify-content:space-between;margin-top:8px;">
             <div style="font-size:9px;color:var(--text2);">${ultimos14[0].label}</div>
-            <div style="font-size:9px;color:var(--green);">Hoje</div>
+            <div style="font-size:9px;color:var(--green);font-weight:700;">● Hoje</div>
           </div>
         </div>
 

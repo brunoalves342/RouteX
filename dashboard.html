@@ -953,98 +953,194 @@ function toggleDiaDetail(id){
 
 // ── PERFIS ──
 let _grupoAberto = null;
+let _perfisDB = {
+  'adm':      { senha:'Macaco22', tipo:'adm',        emoji:'⚙️' },
+  'Andre':    { senha:'adm2006',  tipo:'supervisor',  emoji:'👀' },
+  'Bruno':    { senha:'Macaco22', tipo:'entregador',  emoji:'🛵' },
+  'Jonathas': { senha:'ent2',     tipo:'entregador',  emoji:'🛵' },
+};
+
+const _grupos = [
+  { id:'adm',        label:'Administrador', emoji:'⚙️', cor:'rgba(251,191,36,0.12)',  borda:'rgba(251,191,36,0.25)',  txt:'#fbbf24' },
+  { id:'supervisor', label:'Supervisor',    emoji:'👀', cor:'rgba(96,165,250,0.12)',  borda:'rgba(96,165,250,0.25)',  txt:'#60a5fa' },
+  { id:'entregador', label:'Entregadores',  emoji:'🛵', cor:'rgba(52,211,153,0.12)',  borda:'rgba(52,211,153,0.25)',  txt:'#34d399' },
+];
 
 function renderPerfis(){
-  const TODOS = {
-    'adm':      { senha:'Macaco22', tipo:'adm',        emoji:'⚙️' },
-    'Andre':    { senha:'adm2006',  tipo:'supervisor',  emoji:'👀' },
-    'Bruno':    { senha:'Macaco22', tipo:'entregador',  emoji:'🛵' },
-    'Jonathas': { senha:'ent2',     tipo:'entregador',  emoji:'🛵' },
-  };
+  const grupos = _grupos.map(g=>({
+    ...g, count: Object.values(_perfisDB).filter(i=>i.tipo===g.id).length
+  }));
 
-  const grupos = [
-    { id:'adm',        label:'Administrador', emoji:'⚙️', cor:'rgba(251,191,36,0.12)',  borda:'rgba(251,191,36,0.25)',  txt:'var(--yellow)' },
-    { id:'supervisor', label:'Supervisor',    emoji:'👀', cor:'rgba(96,165,250,0.12)',  borda:'rgba(96,165,250,0.25)',  txt:'var(--accent)' },
-    { id:'entregador', label:'Entregadores',  emoji:'🛵', cor:'rgba(52,211,153,0.12)',  borda:'rgba(52,211,153,0.25)',  txt:'var(--green)'  },
-  ];
+  let html = `
+  <!-- Cabeçalho com botão novo perfil -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <div style="font-size:13px;color:var(--text2);">Clique num grupo para ver os perfis</div>
+    <button onclick="abrirModalNovoPerfil()"
+      style="background:linear-gradient(135deg,#3b6ef0,#818cf8);color:#fff;border:none;
+      border-radius:10px;padding:9px 18px;font-size:13px;font-weight:700;
+      font-family:'Inter',sans-serif;cursor:pointer;display:flex;align-items:center;gap:6px;">
+      ＋ Novo perfil
+    </button>
+  </div>
 
-  // Cards lado a lado
-  let html = `<div style="display:flex;gap:12px;margin-bottom:16px;">`;
-  grupos.forEach(g=>{
-    const count = Object.values(TODOS).filter(i=>i.tipo===g.id).length;
-    html += `<div onclick="abrirGrupoPerfil('${g.id}')" id="gcard_${g.id}"
-      style="flex:1;cursor:pointer;background:${g.cor};border:1px solid ${g.borda};
-      border-radius:14px;padding:18px 16px;text-align:center;transition:all 0.15s;user-select:none;">
-      <div style="font-size:28px;margin-bottom:8px;">${g.emoji}</div>
-      <div style="font-size:14px;font-weight:800;color:${g.txt};margin-bottom:4px;">${g.label}</div>
-      <div style="font-size:12px;color:var(--text2);">${count} perfil${count!==1?'s':''}</div>
-    </div>`;
-  });
-  html += `</div>`;
+  <!-- Cards dos grupos -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
+    ${grupos.map(g=>`
+    <div onclick="abrirGrupoPerfil('${g.id}')" id="gcard_${g.id}"
+      style="cursor:pointer;background:${g.cor};border:1.5px solid ${g.borda};
+      border-radius:16px;padding:24px 16px;text-align:center;transition:all 0.15s;user-select:none;">
+      <div style="font-size:32px;margin-bottom:10px;">${g.emoji}</div>
+      <div style="font-size:15px;font-weight:800;color:${g.txt};margin-bottom:4px;">${g.label}</div>
+      <div style="font-size:12px;color:var(--text2);">${g.count} perfil${g.count!==1?'s':''}</div>
+    </div>`).join('')}
+  </div>
 
-  // Área de detalhe (aparece abaixo dos cards)
-  html += `<div id="grupoPerfisDetalhe" style="display:none;"></div>`;
+  <!-- Detalhe do grupo -->
+  <div id="grupoPerfisDetalhe" style="display:none;"></div>`;
 
   document.getElementById('content').innerHTML = html;
-
-  // Armazena dados pra usar depois
-  window._TODOS_PERFIS = TODOS;
-  window._GRUPOS_PERFIS = grupos;
-
-  // Se tinha um grupo aberto antes, reabre
   if(_grupoAberto) abrirGrupoPerfil(_grupoAberto);
 }
 
 function abrirGrupoPerfil(grupoId){
-  const TODOS  = window._TODOS_PERFIS;
-  const grupos = window._GRUPOS_PERFIS;
-  const g      = grupos.find(x=>x.id===grupoId);
-  const users  = Object.entries(TODOS).filter(([,i])=>i.tipo===grupoId);
-
-  // Destaca card selecionado
-  grupos.forEach(x=>{
-    const el = document.getElementById(`gcard_${x.id}`);
-    if(el) el.style.opacity = x.id===grupoId ? '1' : '0.5';
-  });
-
+  const g     = _grupos.find(x=>x.id===grupoId);
+  const users = Object.entries(_perfisDB).filter(([,i])=>i.tipo===grupoId);
   _grupoAberto = grupoId;
 
-  let html = `<div style="background:var(--glass);border:1px solid ${g.borda};
-    border-radius:14px;padding:20px;">
-    <div style="font-size:13px;font-weight:800;color:${g.txt};margin-bottom:14px;
-      display:flex;align-items:center;gap:8px;">${g.emoji} ${g.label}</div>
-    <div style="display:flex;flex-direction:column;gap:10px;">`;
-
-  users.forEach(([user, info])=>{
-    html += `<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);
-      border-radius:12px;padding:14px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <div style="font-size:15px;font-weight:800;">${info.emoji} ${user}</div>
-        <button class="btn-edit-sm" onclick="toggleEditSenha('${user}')">✏️ Editar senha</button>
-      </div>
-      <div style="display:flex;gap:24px;align-items:center;">
-        <div class="perfil-dado">Login: <span>${user}</span></div>
-        <div class="perfil-dado">Senha:
-          <span id="senhaVal_${user}">••••••</span>
-          <button onclick="toggleVerSenha('${user}','${info.senha}')"
-            style="background:none;border:none;cursor:pointer;font-size:13px;margin-left:4px;color:var(--text2);">👁️</button>
-        </div>
-      </div>
-      <div class="edit-senha-form" id="formSenha_${user}" style="margin-top:10px;">
-        <div class="edit-senha-row">
-          <input class="modal-input" type="text" id="inputSenha_${user}" value="${info.senha}" style="flex:1;" />
-          <button class="btn-save" style="padding:9px 16px;" onclick="salvarSenha('${user}')">✓ Salvar</button>
-          <button class="btn-cancel" style="padding:9px 12px;" onclick="toggleEditSenha('${user}')">✕</button>
-        </div>
-      </div>
-    </div>`;
+  // Destaca card selecionado
+  _grupos.forEach(x=>{
+    const el = document.getElementById(`gcard_${x.id}`);
+    if(el){ el.style.opacity = x.id===grupoId ? '1' : '0.45'; el.style.transform = x.id===grupoId ? 'scale(1.02)' : 'scale(1)'; }
   });
 
-  html += '</div></div>';
+  const canDelete = grupoId !== 'adm'; // ADM não pode excluir
+
+  let html = `
+  <div style="background:var(--glass);border:1.5px solid ${g.borda};border-radius:16px;padding:20px;">
+    <div style="font-size:14px;font-weight:800;color:${g.txt};margin-bottom:16px;
+      display:flex;align-items:center;gap:8px;">
+      ${g.emoji} ${g.label}
+      <span style="font-size:11px;font-weight:500;color:var(--text2);margin-left:4px;">${users.length} perfil${users.length!==1?'s':''}</span>
+    </div>
+
+    ${users.length===0
+      ? `<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">Nenhum perfil neste grupo</div>`
+      : `<div style="display:flex;flex-direction:column;gap:10px;">
+        ${users.map(([user,info])=>`
+          <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);
+            border-radius:12px;padding:14px 16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <div style="width:36px;height:36px;border-radius:10px;background:${g.cor};
+                  display:flex;align-items:center;justify-content:center;font-size:16px;">${info.emoji}</div>
+                <div style="font-size:15px;font-weight:800;">${user}</div>
+              </div>
+              <div style="display:flex;gap:8px;">
+                <button class="btn-edit-sm" onclick="toggleEditSenha('${user}')">✏️ Editar senha</button>
+                ${canDelete ? `<button onclick="excluirPerfil('${user}')"
+                  style="background:rgba(248,113,113,0.12);color:var(--red);border:1px solid rgba(248,113,113,0.25);
+                  border-radius:8px;padding:5px 10px;font-size:12px;font-weight:700;
+                  font-family:'Inter',sans-serif;cursor:pointer;">🗑</button>` : ''}
+              </div>
+            </div>
+            <div style="display:flex;gap:20px;align-items:center;">
+              <div class="perfil-dado">Login: <span>${user}</span></div>
+              <div class="perfil-dado">Senha:
+                <span id="senhaVal_${user}">••••••</span>
+                <button onclick="toggleVerSenha('${user}','${info.senha}')"
+                  style="background:none;border:none;cursor:pointer;font-size:13px;margin-left:4px;color:var(--text2);">👁️</button>
+              </div>
+            </div>
+            <div class="edit-senha-form" id="formSenha_${user}" style="margin-top:10px;">
+              <div class="edit-senha-row">
+                <input class="modal-input" type="text" id="inputSenha_${user}" value="${info.senha}" style="flex:1;" />
+                <button class="btn-save" style="padding:9px 16px;" onclick="salvarSenha('${user}')">✓ Salvar</button>
+                <button class="btn-cancel" style="padding:9px 12px;" onclick="toggleEditSenha('${user}')">✕</button>
+              </div>
+            </div>
+          </div>`).join('')}
+        </div>`}
+  </div>`;
 
   const detalhe = document.getElementById('grupoPerfisDetalhe');
   detalhe.innerHTML = html;
   detalhe.style.display = 'block';
+}
+
+function excluirPerfil(user){
+  if(!confirm(`Excluir o perfil de "${user}"? Esta ação não pode ser desfeita.`)) return;
+  delete _perfisDB[user];
+  toast(`✓ Perfil de ${user} excluído!`);
+  renderPerfis();
+}
+
+function abrirModalNovoPerfil(){
+  const modal = document.getElementById('modalNovoPerfil');
+  if(modal){ modal.classList.add('show'); return; }
+
+  // Cria o modal dinamicamente
+  const div = document.createElement('div');
+  div.id = 'modalNovoPerfil';
+  div.className = 'modal-bg show';
+  div.onclick = (e)=>{ if(e.target===div) fecharModalNovoPerfil(); };
+  div.innerHTML = `
+    <div class="modal-box" style="width:420px;">
+      <div class="modal-title">＋ Novo perfil</div>
+      <div class="modal-sub">Preencha os dados do novo usuário</div>
+
+      <div class="modal-field">
+        <div class="modal-label">Login</div>
+        <input class="modal-input" type="text" id="novoLogin" placeholder="Ex: Carlos" />
+      </div>
+
+      <div class="modal-field">
+        <div class="modal-label">Senha</div>
+        <input class="modal-input" type="text" id="novaSenha" placeholder="Ex: senha123" />
+      </div>
+
+      <div class="modal-field">
+        <div class="modal-label">Tipo de perfil</div>
+        <select id="novoTipo" class="modal-input" style="cursor:pointer;">
+          <option value="entregador">🛵 Entregador</option>
+          <option value="supervisor">👀 Supervisor</option>
+        </select>
+      </div>
+
+      <div id="novoPerfilErr" style="font-size:12px;color:var(--red);min-height:16px;margin-bottom:8px;"></div>
+
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="fecharModalNovoPerfil()">Cancelar</button>
+        <button class="btn-save" onclick="criarNovoPerfil()">✓ Criar perfil</button>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+}
+
+function fecharModalNovoPerfil(){
+  const modal = document.getElementById('modalNovoPerfil');
+  if(modal){ modal.classList.remove('show'); setTimeout(()=>modal.remove(),200); }
+}
+
+function criarNovoPerfil(){
+  const login = document.getElementById('novoLogin').value.trim();
+  const senha = document.getElementById('novaSenha').value.trim();
+  const tipo  = document.getElementById('novoTipo').value;
+  const err   = document.getElementById('novoPerfilErr');
+
+  if(!login){ err.textContent='⚠️ Digite um login!'; return; }
+  if(!senha){ err.textContent='⚠️ Digite uma senha!'; return; }
+  if(_perfisDB[login]){ err.textContent='⚠️ Já existe um perfil com esse login!'; return; }
+
+  const emojis = { entregador:'🛵', supervisor:'👀' };
+  _perfisDB[login] = { senha, tipo, emoji: emojis[tipo] };
+
+  // Atualiza ENTREGADORES se for entregador
+  if(tipo==='entregador' && !ENTREGADORES.includes(login)) ENTREGADORES.push(login);
+
+  toast(`✓ Perfil de ${login} criado!`);
+  fecharModalNovoPerfil();
+  _grupoAberto = tipo;
+  renderPerfis();
 }
 
 let _senhaVis = {};

@@ -335,18 +335,65 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 // ── Usuários ──
-const USUARIOS = {
-  'adm':   { senha:'Macaco22', tipo:'adm' },
-  'Andre': { senha:'adm2006',  tipo:'supervisor' },
+// Perfis padrão — só usados na 1ª vez (gravados em perfis/ no Firebase) ou se o banco estiver fora do ar
+const PERFIS_PADRAO = {
+  'adm':      { senha:'Macaco22', tipo:'adm' },
+  'Bruno':    { senha:'Macaco22', tipo:'entregador', alias:['Bruno'] },
+  'Jonathas': { senha:'ent2',     tipo:'entregador', alias:['Jonathas','Entregador2'] },
+  'Andre':    { senha:'adm2006',  tipo:'supervisor' },
 };
+const EMOJI_TIPO = { adm:'⚙️', entregador:'🛵', supervisor:'👀' };
+const USUARIOS = {};        // preenchido por aplicarPerfis()
+const ENTREGADORES = [];    // idem (só quem é do tipo entregador)
 
-const ENTREGADORES = ['Bruno','Jonathas'];
+function aplicarPerfis(obj){
+  Object.keys(USUARIOS).forEach(k=>delete USUARIOS[k]);
+  Object.entries(obj||{}).forEach(([login,p])=>{
+    if(!p || p.senha==null || !EMOJI_TIPO[p.tipo]) return;
+    const u = { senha:String(p.senha), tipo:p.tipo, emoji:EMOJI_TIPO[p.tipo] };
+    if(p.tipo==='entregador'){
+      const al = Array.isArray(p.alias) ? p.alias : Object.values(p.alias||{});
+      u.alias = [login, ...al.filter(a=>a && a!==login)];   // 1º = nome atual; os outros = nomes antigos (histórico)
+    }
+    USUARIOS[login] = u;
+  });
+  if(!Object.values(USUARIOS).some(u=>u.tipo==='adm')) { aplicarPerfis(PERFIS_PADRAO); return; }
+  ENTREGADORES.length = 0;
+  Object.entries(USUARIOS).forEach(([l,u])=>{ if(u.tipo==='entregador') ENTREGADORES.push(l); });
+}
+aplicarPerfis(PERFIS_PADRAO);
 
 let usuarioAtual = null;
 let paginaAtual  = 'visao';
 let allData      = {};
 let chartInstance = null;
 let filtroMeses  = 1;
+let filtroHist   = 1;   // filtro só do Histórico: 0 = tudo (padrão do ADM)
+function ehAdmLogado(){ return !!(usuarioAtual && USUARIOS[usuarioAtual] && USUARIOS[usuarioAtual].tipo==='adm'); }
+function setFiltroHist(m){ filtroHist=m; renderHistorico(); }
+function btnsFiltroHist(){
+  return `<button class="filter-btn ${filtroHist===1?'active':''}" onclick="setFiltroHist(1)">Este mês</button>
+        <button class="filter-btn ${filtroHist===3?'active':''}" onclick="setFiltroHist(3)">3 meses</button>
+        <button class="filter-btn ${filtroHist===6?'active':''}" onclick="setFiltroHist(6)">6 meses</button>`
+        + (ehAdmLogado() ? `<button class="filter-btn ${filtroHist===0?'active':''}" onclick="setFiltroHist(0)">Tudo</button>` : '');
+}
+
+let _perfisProntos; const _perfisPromise = new Promise(r=>{ _perfisProntos=r; });
+setTimeout(()=>_perfisProntos(), 4000);   // se o banco demorar, usa os padrões
+db.ref('perfis').on('value', snap=>{
+  const v = snap.val();
+  if(!v){
+    db.ref('perfis').set(PERFIS_PADRAO).catch(e=>console.error('Firebase (perfis):', e));  // 1ª vez
+    _perfisProntos();
+    return;
+  }
+  aplicarPerfis(v);
+  _perfisProntos();
+  if(usuarioAtual){
+    if(!USUARIOS[usuarioAtual] || USUARIOS[usuarioAtual].tipo==='entregador'){ toast('⚠️ Seu perfil foi alterado. Entre de novo.'); sair(); return; }
+    if(['perfis','visao','entregadores'].includes(paginaAtual)) renderPagina();
+  }
+}, err=>{ console.error('Firebase (perfis):', err); _perfisProntos(); });
 
 // ── Utils ──
 function fmt(v){ return 'R$ '+parseFloat(v||0).toFixed(2).replace('.',','); }
@@ -400,7 +447,8 @@ function toggleSenhaLogin(){
   i.type=i.type==='password'?'text':'password';
 }
 
-function fazerLogin(){
+async function fazerLogin(){
+  await _perfisPromise;
   const nome  = document.getElementById('loginNome').value.trim();
   const senha = document.getElementById('loginSenha').value;
   const err   = document.getElementById('loginErr');
@@ -409,6 +457,7 @@ function fazerLogin(){
   if(USUARIOS[user].tipo==='entregador'){ err.textContent='Acesso não permitido.'; return; }
   err.textContent='';
   usuarioAtual=user;
+  filtroHist = USUARIOS[user].tipo==='adm' ? 0 : 1;   // ADM começa vendo todos os meses
   document.getElementById('loginWrap').style.display='none';
   document.getElementById('appWrap').style.display='grid';
   document.getElementById('badgeUser').textContent='⚙️ '+user;
@@ -465,8 +514,7 @@ function renderPagina(){
 }
 
 // ── Pega entregas de um user (com aliases) ──
-const ALIASES_BASE = { 'Jonathas':['Jonathas','Entregador2'], 'Bruno':['Bruno'] };
-function aliasesDe(user){ return ALIASES_BASE[user]||[user]; }
+function aliasesDe(user){ return (USUARIOS[user]&&USUARIOS[user].alias)||[user]; }
 
 // Junta as entregas dos aliases POR DIA (antes, se os dois tinham o mesmo dia, um apagava o outro)
 // e marca em _owner de qual pasta do Firebase cada entrega realmente é (pra editar/excluir no lugar certo)
@@ -1060,12 +1108,7 @@ function toggleDiaDetail(id){
 
 // ── PERFIS ──
 let _grupoAberto = null;
-let _perfisDB = {
-  'adm':      { senha:'Macaco22', tipo:'adm',        emoji:'⚙️' },
-  'Andre':    { senha:'adm2006',  tipo:'supervisor',  emoji:'👀' },
-  'Bruno':    { senha:'Macaco22', tipo:'entregador',  emoji:'🛵' },
-  'Jonathas': { senha:'ent2',     tipo:'entregador',  emoji:'🛵' },
-};
+const _perfisDB = USUARIOS;   // perfis reais (Firebase: perfis/)
 
 const _grupos = [
   { id:'adm',        label:'Administrador', emoji:'⚙️', cor:'rgba(251,191,36,0.12)',  borda:'rgba(251,191,36,0.25)',  txt:'#fbbf24' },
@@ -1096,10 +1139,7 @@ function renderPerfis(){
   // Mostra tudo direto — sem precisar clicar nos grupos
   let html = `
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-    <div>
-      <div style="font-size:13px;color:var(--text2);">Gerencie todos os perfis do sistema</div>
-      <div style="font-size:11px;color:var(--yellow);margin-top:3px;opacity:0.85;">⚠️ Alterações feitas aqui valem só até recarregar a página e não mudam o login do app.</div>
-    </div>
+    <div style="font-size:13px;color:var(--text2);">Gerencie todos os perfis do sistema</div>
     <button onclick="abrirModalNovoPerfil()"
       style="background:linear-gradient(135deg,#3b6ef0,#818cf8);color:#fff;border:none;
       border-radius:10px;padding:9px 18px;font-size:13px;font-weight:700;
@@ -1238,10 +1278,11 @@ function abrirGrupoPerfil(grupoId){
 }
 
 function excluirPerfil(user){
-  if(!confirm(`Excluir o perfil de "${user}"? Esta ação não pode ser desfeita.`)) return;
-  delete _perfisDB[user];
-  toast(`✓ Perfil de ${user} excluído!`);
-  renderPerfis();
+  if(_perfisDB[user] && _perfisDB[user].tipo==='adm'){ toast('⚠️ O administrador não pode ser excluído'); return; }
+  if(!confirm(`Excluir o perfil de "${user}"? Ele não vai mais conseguir entrar no app. As entregas dele continuam salvas.`)) return;
+  db.ref(`perfis/${user}`).remove()
+    .then(()=>toast(`✓ Perfil de ${user} excluído!`))
+    .catch(err=>{ console.error(err); toast('❌ Erro ao excluir. Tente de novo.'); });
 }
 
 function abrirModalEditarPerfil(user, senha, tipo){
@@ -1332,36 +1373,31 @@ function salvarEdicaoPerfil(loginAntigo){
   const novaSenha = document.getElementById('editSenha').value.trim();
   const novoTipo  = document.getElementById('editTipo').value;
   const err = document.getElementById('editPerfilErr');
+  const infoAntiga = _perfisDB[loginAntigo];
+  if(!infoAntiga){ err.textContent='⚠️ Perfil não encontrado.'; return; }
 
   if(!novoLogin){ err.textContent='⚠️ Digite um login!'; return; }
-  if(/['"<>&\\]/.test(novoLogin)){ err.textContent='⚠️ O login não pode ter aspas, < > & ou barra.'; return; }
+  if(LOGIN_INVALIDO.test(novoLogin)){ err.textContent='⚠️ O login não pode ter aspas, ponto, # $ [ ] / < > & ou barra.'; return; }
   if(!novaSenha){ err.textContent='⚠️ Digite uma senha!'; return; }
-  if(novoLogin !== loginAntigo && _perfisDB[novoLogin]){ err.textContent='⚠️ Já existe um perfil com esse login!'; return; }
-
-  const infoAntiga = _perfisDB[loginAntigo];
-  const emojis = { adm:'⚙️', entregador:'🛵', supervisor:'👀' };
-
-  // Se renomeou um entregador, as entregas continuam gravadas no nome antigo: mantém o vínculo
-  if(infoAntiga.tipo==='entregador' && novoLogin!==loginAntigo) ALIASES_BASE[novoLogin]=aliasesDe(loginAntigo).slice();
-
-  // Remove o antigo e cria com novo login
-  delete _perfisDB[loginAntigo];
-  _perfisDB[novoLogin] = { senha: novaSenha, tipo: novoTipo, emoji: emojis[novoTipo] };
-
-  // Atualiza lista de entregadores
-  const idx = ENTREGADORES.indexOf(loginAntigo);
-  if(infoAntiga.tipo==='entregador' && novoTipo!=='entregador'){
-    if(idx!==-1) ENTREGADORES.splice(idx,1);
-  } else if(novoTipo==='entregador' && !ENTREGADORES.includes(novoLogin)){
-    if(idx!==-1) ENTREGADORES[idx]=novoLogin;
-    else ENTREGADORES.push(novoLogin);
-  } else if(idx!==-1 && novoLogin!==loginAntigo){
-    ENTREGADORES[idx]=novoLogin;
+  if(infoAntiga.tipo==='adm' && novoLogin!==loginAntigo){ err.textContent='⚠️ O login do administrador não pode mudar.'; return; }
+  if(novoLogin.toLowerCase()!==loginAntigo.toLowerCase() && Object.keys(_perfisDB).some(k=>k.toLowerCase()===novoLogin.toLowerCase())){
+    err.textContent='⚠️ Já existe um perfil com esse login!'; return;
   }
 
-  document.getElementById('modalEditarPerfil').remove();
-  toast(`✓ Perfil atualizado com sucesso!`);
-  renderPerfis();
+  const novo = { senha: novaSenha, tipo: novoTipo };
+  if(novoTipo==='entregador'){
+    // se renomeou, as entregas continuam gravadas no nome antigo: guarda como "alias" pra não perder o histórico
+    const antigos = infoAntiga.tipo==='entregador' ? aliasesDe(loginAntigo) : [];
+    novo.alias = [novoLogin, ...antigos.filter(a=>a!==novoLogin)];
+  }
+  const upd = {};
+  if(novoLogin!==loginAntigo) upd[loginAntigo] = null;
+  upd[novoLogin] = novo;
+
+  db.ref('perfis').update(upd).then(()=>{
+    const m=document.getElementById('modalEditarPerfil'); if(m) m.remove();
+    toast('✓ Perfil atualizado com sucesso!');
+  }).catch(e=>{ console.error(e); err.textContent='❌ Erro ao salvar. Tente de novo.'; });
 }
 
 function abrirModalNovoPerfil(){
@@ -1433,20 +1469,17 @@ function criarNovoPerfil(){
   const err   = document.getElementById('novoPerfilErr');
 
   if(!login){ err.textContent='⚠️ Digite um login!'; return; }
-  if(/['"<>&\\]/.test(login)){ err.textContent='⚠️ O login não pode ter aspas, < > & ou barra.'; return; }
+  if(LOGIN_INVALIDO.test(login)){ err.textContent='⚠️ O login não pode ter aspas, ponto, # $ [ ] / < > & ou barra.'; return; }
   if(!senha){ err.textContent='⚠️ Digite uma senha!'; return; }
-  if(_perfisDB[login]){ err.textContent='⚠️ Já existe um perfil com esse login!'; return; }
+  if(Object.keys(_perfisDB).some(k=>k.toLowerCase()===login.toLowerCase())){ err.textContent='⚠️ Já existe um perfil com esse login!'; return; }
+  if(tipo!=='entregador' && tipo!=='supervisor'){ err.textContent='⚠️ Tipo inválido.'; return; }
 
-  const emojis = { entregador:'🛵', supervisor:'👀' };
-  _perfisDB[login] = { senha, tipo, emoji: emojis[tipo] };
-
-  // Atualiza ENTREGADORES se for entregador
-  if(tipo==='entregador' && !ENTREGADORES.includes(login)) ENTREGADORES.push(login);
-
-  toast(`✓ Perfil de ${login} criado!`);
-  fecharModalNovoPerfil();
-  _grupoAberto = tipo;
-  renderPerfis();
+  const novo = { senha, tipo };
+  if(tipo==='entregador') novo.alias = [login];
+  db.ref(`perfis/${login}`).set(novo).then(()=>{
+    toast(`✓ Perfil de ${login} criado!`);
+    fecharModalNovoPerfil();
+  }).catch(e=>{ console.error(e); err.textContent='❌ Erro ao salvar. Tente de novo.'; });
 }
 
 let _senhaVis = {};
@@ -1459,6 +1492,7 @@ function toggleEditSenha(user){
   const f = document.getElementById(`formSenha_${user}`);
   f.style.display = f.style.display === 'none' || !f.style.display ? 'block' : 'none';
 }
+const LOGIN_INVALIDO = /['"<>&\\.$#\[\]\/]/;
 function salvarSenha(user){
   const nova = document.getElementById(`inputSenha_${user}`).value.trim();
   if(!nova){ toast('⚠️ Digite uma senha!'); return; }
@@ -1608,7 +1642,7 @@ async function salvarEndEdit(i){
 // ── HISTÓRICO ──
 function renderHistorico(){
   const todas=getTodasEntregas();
-  const inicio=inicioMesFiltro();
+  const inicio = filtroHist===0 ? '0000-00-00' : (()=>{ const sv=filtroMeses; filtroMeses=filtroHist; const r=inicioMesFiltro(); filtroMeses=sv; return r; })();
   const dias=Object.entries(todas)
     .filter(([d])=>d>=inicio && d!==hoje())
     .sort(([a],[b])=>b.localeCompare(a));
@@ -1620,9 +1654,7 @@ function renderHistorico(){
   if(!dias.length){
     document.getElementById('content').innerHTML=`
       <div class="filters">
-        <button class="filter-btn ${filtroMeses===1?'active':''}" onclick="setFiltro(1)">Este mês</button>
-        <button class="filter-btn ${filtroMeses===3?'active':''}" onclick="setFiltro(3)">3 meses</button>
-        <button class="filter-btn ${filtroMeses===6?'active':''}" onclick="setFiltro(6)">6 meses</button>
+        ${btnsFiltroHist()}
       </div>
       <div style="text-align:center;padding:80px 0;">
         <div style="font-size:48px;margin-bottom:16px;opacity:0.3;">📅</div>
@@ -1642,9 +1674,7 @@ function renderHistorico(){
 
   let html=`
     <div class="filters" style="margin-bottom:20px;">
-      <button class="filter-btn ${filtroMeses===1?'active':''}" onclick="setFiltro(1)">Este mês</button>
-      <button class="filter-btn ${filtroMeses===3?'active':''}" onclick="setFiltro(3)">3 meses</button>
-      <button class="filter-btn ${filtroMeses===6?'active':''}" onclick="setFiltro(6)">6 meses</button>
+      ${btnsFiltroHist()}
     </div>`;
 
   Object.entries(meses).sort(([a],[b])=>b.localeCompare(a)).forEach(([,mes])=>{

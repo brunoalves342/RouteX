@@ -651,13 +651,61 @@ const db = firebase.database();
 // ══════════════════════════════════════════
 //  USUÁRIOS
 // ══════════════════════════════════════════
-const USUARIOS = {
-  'adm':      { senha:'Macaco22',  tipo:'adm',        emoji:'⚙️' },
-  'Bruno':    { senha:'Macaco22',  tipo:'entregador',  emoji:'🛵', alias:['Bruno'] },
-  'Jonathas': { senha:'ent2',      tipo:'entregador',  emoji:'🛵', alias:['Jonathas','Entregador2'] },
-  'Andre':    { senha:'adm2006',   tipo:'supervisor',  emoji:'👀' },
-
+// Perfis padrão — só usados na 1ª vez (gravados em perfis/ no Firebase) ou se o banco estiver fora do ar
+const PERFIS_PADRAO = {
+  'adm':      { senha:'Macaco22', tipo:'adm' },
+  'Bruno':    { senha:'Macaco22', tipo:'entregador', alias:['Bruno'] },
+  'Jonathas': { senha:'ent2',     tipo:'entregador', alias:['Jonathas','Entregador2'] },
+  'Andre':    { senha:'adm2006',  tipo:'supervisor' },
 };
+const EMOJI_TIPO = { adm:'⚙️', entregador:'🛵', supervisor:'👀' };
+const USUARIOS = {};   // preenchido por aplicarPerfis()
+
+function aplicarPerfis(obj){
+  Object.keys(USUARIOS).forEach(k=>delete USUARIOS[k]);
+  Object.entries(obj||{}).forEach(([login,p])=>{
+    if(!p || p.senha==null || !EMOJI_TIPO[p.tipo]) return;
+    const u = { senha:String(p.senha), tipo:p.tipo, emoji:EMOJI_TIPO[p.tipo] };
+    if(p.tipo==='entregador'){
+      const al = Array.isArray(p.alias) ? p.alias : Object.values(p.alias||{});
+      u.alias = [login, ...al.filter(a=>a && a!==login)];   // 1º = nome atual; os outros = nomes antigos (histórico)
+    }
+    USUARIOS[login] = u;
+  });
+  // segurança: nunca ficar sem administrador
+  if(!Object.values(USUARIOS).some(u=>u.tipo==='adm')) aplicarPerfis(PERFIS_PADRAO);
+}
+aplicarPerfis(PERFIS_PADRAO);
+
+let _perfisProntos; const _perfisPromise = new Promise(r=>{ _perfisProntos=r; });
+setTimeout(()=>_perfisProntos(), 4000);   // se o banco demorar, usa os padrões
+let tipoSessao = null;
+
+db.ref('perfis').on('value', snap=>{
+  const v = snap.val();
+  if(!v){
+    db.ref('perfis').set(PERFIS_PADRAO).catch(e=>console.error('Firebase (perfis):', e));  // 1ª vez
+    _perfisProntos();
+    return;
+  }
+  aplicarPerfis(v);
+  _perfisProntos();
+  onPerfisMudaram();
+}, err=>{ console.error('Firebase (perfis):', err); _perfisProntos(); });
+
+function onPerfisMudaram(){
+  if(usuarioAtual){
+    if(!USUARIOS[usuarioAtual] || USUARIOS[usuarioAtual].tipo!==tipoSessao){
+      toast('⚠️ Seu perfil foi alterado. Entre de novo.');
+      sair();
+      return;
+    }
+  }
+  const ae = document.activeElement;
+  if(ae && ae.id && ae.id.startsWith('input_senha_')) return;   // não atrapalha quem está digitando
+  const pa = document.getElementById('pageAdm');
+  if(abaAdmAtiva==='perfis' && pa && pa.classList.contains('active')) renderPerfiis();
+}
 
 // ══════════════════════════════════════════
 //  ESTADO
@@ -758,7 +806,8 @@ function toggleSenha(){
 // ══════════════════════════════════════════
 //  LOGIN
 // ══════════════════════════════════════════
-function fazerLogin(){
+async function fazerLogin(){
+  await _perfisPromise;
   const nome  = document.getElementById('loginNome').value.trim();
   const senha = document.getElementById('loginSenha').value;
   const err   = document.getElementById('loginErr');
@@ -796,6 +845,7 @@ document.getElementById('loginSenha').addEventListener('keydown', e=>{ if(e.key=
 
 function entrarApp(){
   const tipo = USUARIOS[usuarioAtual].tipo;
+  tipoSessao = tipo;
   diaEscutando = hoje();
 
   // ADM e Supervisor vão direto pro painel
@@ -820,7 +870,7 @@ function sair(){
   if(window._admInterval){ clearInterval(window._admInterval); }
   // Remove sessão salva ao sair manualmente
   try{ localStorage.removeItem('routex_session'); }catch(e){}
-  usuarioAtual=null; idAtual=null; entAtual=null; entregasLocal=[]; diaEscutando=null;
+  usuarioAtual=null; idAtual=null; entAtual=null; entregasLocal=[]; diaEscutando=null; tipoSessao=null;
   mostrarPagina('pageLogin');
 }
 
@@ -1180,8 +1230,10 @@ function renderDiasAnteriores(){
   const el = document.getElementById('histScroll');
   el.innerHTML = `<div class="hist-empty"><div class="ei">🔄</div><p>Carregando...</p></div>`;
 
-  db.ref(`entregas/${usuarioAtual}`).once('value', snap=>{
-    const allDias = snap.val()||{};
+  const meusAliases = USUARIOS[usuarioAtual].alias || [usuarioAtual];
+  Promise.all(meusAliases.map(a=>db.ref(`entregas/${a}`).once('value'))).then(snaps=>{
+    const allDias = {};
+    snaps.forEach(sn=>{ Object.entries(sn.val()||{}).forEach(([dia,ents])=>{ allDias[dia]=Object.assign(allDias[dia]||{}, ents); }); });
     const diasAnt = Object.keys(allDias).sort().reverse().filter(d=>d!==hoje() && dentrodoMes(d));
 
     document.getElementById('histCount').textContent = diasAnt.length + (diasAnt.length===1?' dia':' dias');
@@ -1209,9 +1261,11 @@ function renderDiasAnteriores(){
 }
 
 function verDiaEntregador(dia){
-  db.ref(`entregas/${usuarioAtual}/${dia}`).once('value', snap=>{
-    const data  = snap.val()||{};
-    const lista = Object.values(data).sort((a,b)=>a.ts-b.ts);
+  const meusAliases = USUARIOS[usuarioAtual].alias || [usuarioAtual];
+  Promise.all(meusAliases.map(a=>db.ref(`entregas/${a}/${dia}`).once('value').then(sn=>({a, d:sn.val()||{}})))).then(res=>{
+    const lista = [];
+    res.forEach(({a,d})=>Object.values(d).forEach(e=>{ if(e&&e.ts) lista.push({...e,_owner:a}); }));
+    lista.sort((x,y)=>x.ts-y.ts);
     const total = lista.length;
     const soma  = lista.reduce((s,e)=>s+(Number(e.taxa)||0),0);
 
@@ -1233,7 +1287,7 @@ function verDiaEntregador(dia){
       </div>
     ` + lista.reverse().map((e,i)=>{
       const num = total-i;
-      return `<div class="hist-card" onclick="abrirDetalhe('${jsStr(e.id)}','${usuarioAtual}','${jsStr(dia)}')">
+      return `<div class="hist-card" onclick="abrirDetalhe('${jsStr(e.id)}','${jsStr(e._owner||usuarioAtual)}','${jsStr(dia)}')">
         <div class="hc-num">${num}</div>
         <div class="hc-info">
           <div class="hc-addr">${escHtml(e.rua)}</div>
@@ -1297,7 +1351,7 @@ function abrirDetalhe(id, user, data){
       ? 'Taxa <span style="font-size:9px;color:rgba(96,165,250,0.6);margin-left:4px;">✏️ editar</span>'
       : 'Taxa da entrega';
 
-    const podeExcluir = tipo==='adm' || user===usuarioAtual;
+    const podeExcluir = tipo==='adm' || (USUARIOS[usuarioAtual].alias||[usuarioAtual]).includes(user);
     document.getElementById('btnExcluir').style.display = podeExcluir ? '' : 'none';
 
     document.getElementById('modalDetalhe').classList.add('show');
@@ -1533,6 +1587,7 @@ function salvarPerfil(user){
   const novaSenha=document.getElementById(`input_senha_${user}`).value.trim();
   if(!novaSenha){ toast('⚠️ Digite uma senha!'); return; }
   USUARIOS[user].senha=novaSenha;
+  db.ref(`perfis/${user}/senha`).set(novaSenha).catch(err=>{ console.error(err); toast('❌ Não consegui salvar a senha no banco'); });
   window[`_senhaReal_${user}`]=novaSenha;
   const el=document.getElementById(`senha_oculta_${user}`);
   el.textContent=window[`_senhaVisivel_${user}`]?novaSenha:'••••••';
@@ -1582,12 +1637,15 @@ function renderHistoricoCard(){
     const entregadores=Object.keys(USUARIOS).filter(u=>USUARIOS[u].tipo==='entregador');
     const dias=new Set();
     entregadores.forEach(user=>{ (USUARIOS[user].alias||[user]).forEach(alias=>{ if(allData[alias]) Object.keys(allData[alias]).forEach(d=>dias.add(d)); }); });
-    const diasAnt=[...dias].sort().reverse().filter(d=>d!==hoje()&&dentrodoMes(d));
+    // ADM vê o histórico de todos os meses; supervisor continua vendo só o mês atual
+    const ehAdm = USUARIOS[usuarioAtual].tipo==='adm';
+    const diasAnt=[...dias].sort().reverse().filter(d=>d!==hoje()&&(ehAdm||dentrodoMes(d)));
     if(!diasAnt.length){
-      document.getElementById('historicoAdmList').innerHTML=`<div class="hist-empty"><div class="ei">📅</div><p>Nenhum dia anterior neste mês.</p></div>`;
+      document.getElementById('historicoAdmList').innerHTML=`<div class="hist-empty"><div class="ei">📅</div><p>${ehAdm?'Nenhum dia anterior ainda.':'Nenhum dia anterior neste mês.'}</p></div>`;
       return;
     }
-    let html='';
+    const NOMES_MES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    let html='', mesAnterior='';
     diasAnt.forEach(dia=>{
       let totalDia=0,totalEnt=0,resumo='';
       entregadores.forEach(user=>{
@@ -1600,6 +1658,11 @@ function renderHistoricoCard(){
             <span style="font-size:12px;font-weight:700;color:var(--accent);">${fmt(soma)}</span></div>`;
         }
       });
+      if(totalEnt>0 && ehAdm && dia.slice(0,7)!==mesAnterior){
+        mesAnterior = dia.slice(0,7);
+        const [yy,mm] = mesAnterior.split('-');
+        html+=`<div style="font-size:11px;font-weight:800;color:var(--accent);text-transform:uppercase;letter-spacing:0.8px;margin:${html?'14px':'2px'} 2px 8px;">${NOMES_MES[parseInt(mm)-1]} ${yy}</div>`;
+      }
       if(totalEnt>0) html+=`<div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:12px;margin-bottom:8px;cursor:pointer;"
           onclick="verRelDia('${jsStr(dia)}')">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -1956,7 +2019,7 @@ function toast(msg){
 }
 
 // Tenta restaurar sessão ao carregar o app
-restaurarSessao();
+_perfisPromise.then(restaurarSessao);
 </script>
 </body>
 </html>

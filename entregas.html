@@ -1233,6 +1233,18 @@ function selecionarParaRota(id){
   sc.scrollTop = top;
 }
 
+// Abre o link do Maps DIRETO NO APP (Android). Se o app não existir, cai pro site.
+// iPhone/PC: abre o link normal.
+function navegarPara(url){ location.href = url; }
+function abrirNoMaps(url){
+  if(/Android/i.test(navigator.userAgent||'')){
+    const semProtocolo = url.replace(/^https:\/\//,'');
+    navegarPara(`intent://${semProtocolo}#Intent;scheme=https;package=com.google.android.apps.maps;S.browser_fallback_url=${encodeURIComponent(url)};end`);
+  } else {
+    window.open(url,'_blank');
+  }
+}
+
 function abrirRotaMultipla(){
   const sel = _rotaSel.map(id=>entregasLocal.find(e=>String(e.id)===id)).filter(Boolean);
   if(!sel.length) return;
@@ -1242,7 +1254,7 @@ function abrirRotaMultipla(){
   // sem "origin": o Maps parte da localização atual do celular
   let url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destino)}&travelmode=driving`;
   if(paradas.length) url += `&waypoints=${paradas.map(encodeURIComponent).join('%7C')}`;
-  window.open(url,'_blank');
+  abrirNoMaps(url);
 }
 
 function renderHistorico(){
@@ -1550,19 +1562,8 @@ function excluirAtual(){
 function abrirRota(){
   if(!entAtual) return;
   const destino=encodeURIComponent(entAtual.rua+', '+(entAtual.numero||'')+', Londrina, PR, Brasil');
-  if(navigator.geolocation){
-    toast('📍 Obtendo localização...');
-    navigator.geolocation.getCurrentPosition(
-      pos=>{
-        const url=`https://www.google.com/maps/dir/?api=1&origin=${pos.coords.latitude},${pos.coords.longitude}&destination=${destino}&travelmode=driving`;
-        window.open(url,'_blank');
-      },
-      ()=>window.open(`https://www.google.com/maps/dir/?api=1&destination=${destino}&travelmode=driving`,'_blank'),
-      {timeout:5000,enableHighAccuracy:true}
-    );
-  } else {
-    window.open(`https://www.google.com/maps/dir/?api=1&destination=${destino}&travelmode=driving`,'_blank');
-  }
+  // sem "origin": o Maps parte da localização atual do celular (e abre na hora, sem esperar o GPS do site)
+  abrirNoMaps(`https://www.google.com/maps/dir/?api=1&destination=${destino}&travelmode=driving`);
 }
 
 // ── Distância ──

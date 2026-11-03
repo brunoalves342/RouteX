@@ -1361,9 +1361,31 @@ function toggleRotaAuto(){
 }
 const _geoCache = {};          // rua|numero → {lat,lng} (ou null se não achou)
 let _geoFila = Promise.resolve();
-let _locRota = null;           // última localização do GPS
+let _locRota = null;           // última localização do GPS: {lat,lng,ts}
 const _pausa = ms => new Promise(r=>setTimeout(r,ms));
-function prepararLocalizacao(){ pegarLocalizacao().then(l=>{ if(l) _locRota = l; }); }
+// GPS ligado enquanto o entregador está com uma entrega aberta / escolhendo rota (desliga sozinho em 10 min).
+// Assim o app sabe a posição EXATA na hora de abrir o Maps e manda ela como ponto de partida
+// (sem isso o Maps às vezes parte de uma posição antiga).
+let _gpsWatch = null, _gpsTimer = null;
+function prepararLocalizacao(){
+  if(!navigator.geolocation) return;
+  if(_gpsWatch!==null){ try{ navigator.geolocation.clearWatch(_gpsWatch); }catch(_){} _gpsWatch = null; }
+  clearTimeout(_gpsTimer);
+  try{
+    _gpsWatch = navigator.geolocation.watchPosition(
+      p=>{ _locRota = { lat:p.coords.latitude, lng:p.coords.longitude, ts:Date.now() }; },
+      ()=>{},
+      { enableHighAccuracy:true, maximumAge:5000, timeout:15000 }
+    );
+  }catch(_){}
+  _gpsTimer = setTimeout(()=>{ if(_gpsWatch!==null){ try{ navigator.geolocation.clearWatch(_gpsWatch); }catch(_){} _gpsWatch = null; } }, 600000);
+}
+// ponto de partida pro Maps: só se a posição for recente (senão deixa o Maps usar a dele)
+function origemRota(){
+  if(USUARIOS[usuarioAtual] && USUARIOS[usuarioAtual].tipo!=='entregador') return '';
+  if(_locRota && Date.now()-_locRota.ts < 120000) return `&origin=${encodeURIComponent(_locRota.lat.toFixed(6)+','+_locRota.lng.toFixed(6))}`;
+  return '';
+}
 function geoDaEntrega(e){
   const k = e.rua+'|'+e.numero;
   if(k in _geoCache) return Promise.resolve(_geoCache[k]);
@@ -1429,8 +1451,8 @@ async function abrirRotaMultipla(){
   const addr = e => `${e.rua}, ${(e.numero && e.numero!=='S/N') ? e.numero+', ' : ''}Londrina, PR, Brasil`;
   const destino = addr(sel[sel.length-1]);
   const paradas = sel.slice(0,-1).map(addr);
-  // sem "origin": o Maps parte da localização atual do celular
-  let url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destino)}&travelmode=driving`;
+  // parte da posição EXATA do GPS (se recente); senão o Maps usa a localização dele
+  let url = `https://www.google.com/maps/dir/?api=1${origemRota()}&destination=${encodeURIComponent(destino)}&travelmode=driving`;
   if(paradas.length) url += `&waypoints=${paradas.map(encodeURIComponent).join('%7C')}`;
   abrirNoMaps(url);
 }
@@ -1626,6 +1648,7 @@ function abrirDetalhe(id, user, data){
     document.getElementById('btnExcluir').style.display = podeExcluir ? '' : 'none';
 
     _podeEditarDet = podeEditar;
+    if(tipo==='entregador') prepararLocalizacao();
     ajustarModalDetalhe();
     document.getElementById('modalDetalhe').classList.add('show');
     calcularDistancia(e);
@@ -1769,8 +1792,8 @@ function excluirAtual(){
 function abrirRota(){
   if(!entAtual) return;
   const destino=encodeURIComponent(entAtual.rua+', '+(entAtual.numero||'')+', Londrina, PR, Brasil');
-  // sem "origin": o Maps parte da localização atual do celular (e abre na hora, sem esperar o GPS do site)
-  abrirNoMaps(`https://www.google.com/maps/dir/?api=1&destination=${destino}&travelmode=driving`);
+  // parte da posição EXATA do GPS (se recente); senão o Maps usa a localização dele
+  abrirNoMaps(`https://www.google.com/maps/dir/?api=1${origemRota()}&destination=${destino}&travelmode=driving`);
 }
 
 // ── Distância ──

@@ -244,6 +244,22 @@
     transform:translateY(100%);
     transition:transform 0.28s cubic-bezier(0.4,0,0.2,1);box-shadow:0 -8px 40px rgba(0,0,0,0.5);}
   .modal-overlay.show .modal-sheet{transform:translateY(0);}
+  /* DETALHE DA ENTREGA — cartão flutuante (não gruda embaixo, não é esmagado pelo teclado) */
+  #modalDetalhe{align-items:center;justify-content:center;padding:16px;
+    bottom:auto;height:100%;}   /* altura/posição ajustadas por JS conforme o teclado */
+  #modalDetalhe .modal-sheet{height:auto;max-height:100%;max-width:440px;overflow-y:auto;overscroll-behavior:contain;
+    border:1px solid var(--glass-border);border-radius:26px;padding:18px 20px 22px;
+    transform:translateY(16px) scale(0.96);opacity:0;
+    transition:transform 0.25s cubic-bezier(0.4,0,0.2,1),opacity 0.2s;
+    box-shadow:0 24px 64px rgba(0,0,0,0.65);}
+  #modalDetalhe.show .modal-sheet{transform:none;opacity:1;}
+  #modalDetalhe .sheet-handle{display:none;}
+  .det-topo{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-shrink:0;}
+  .det-topo .det-badge{margin-bottom:0;}
+  .det-close{width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,0.12);
+    background:rgba(255,255,255,0.06);color:var(--text2);font-size:15px;font-weight:700;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;font-family:'Inter',sans-serif;}
+  .det-close:active{background:rgba(255,255,255,0.12);}
   .sheet-handle{width:38px;height:4px;background:rgba(255,255,255,0.13);border-radius:2px;margin:0 auto 20px;flex-shrink:0;}
 
   /* HISTÓRICO */
@@ -559,17 +575,20 @@
 <div class="modal-overlay" id="modalDetalhe" onclick="fecharDetalhe(event)">
   <div class="modal-sheet">
     <div class="sheet-handle"></div>
-    <div class="det-badge" id="detBadge">🚀 Entrega #1</div>
+    <div class="det-topo">
+      <div class="det-badge" id="detBadge">🚀 Entrega #1</div>
+      <button class="det-close" onclick="fecharDetalhe()" aria-label="Fechar">✕</button>
+    </div>
     <div class="det-addr" id="detAddr" style="cursor:pointer;" onclick="editarEndereco()"></div>
     <!-- Edição de endereço (visível só pro ADM) -->
     <div id="detEnderecoEdit" style="display:none;margin-bottom:4px;">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
         <input type="text" id="inputEditRua" placeholder="Nome da rua"
-          style="flex:1;background:rgba(0,0,0,0.3);border:1.5px solid rgba(96,165,250,0.5);border-radius:10px;
+          style="flex:1;min-width:0;box-sizing:border-box;background:rgba(0,0,0,0.3);border:1.5px solid rgba(96,165,250,0.5);border-radius:10px;
           padding:9px 12px;color:#f0f4ff;font-size:14px;font-weight:600;font-family:'Inter',sans-serif;
           outline:none;-webkit-appearance:none;" />
         <input type="text" id="inputEditNumero" placeholder="Nº"
-          style="width:70px;background:rgba(0,0,0,0.3);border:1.5px solid rgba(96,165,250,0.5);border-radius:10px;
+          style="width:70px;flex-shrink:0;box-sizing:border-box;background:rgba(0,0,0,0.3);border:1.5px solid rgba(96,165,250,0.5);border-radius:10px;
           padding:9px 10px;color:#f0f4ff;font-size:14px;font-weight:600;font-family:'Inter',sans-serif;
           outline:none;-webkit-appearance:none;" />
       </div>
@@ -1444,10 +1463,28 @@ function abrirDetalhe(id, user, data){
     resetarExcluir();
     document.getElementById('btnExcluir').style.display = podeExcluir ? '' : 'none';
 
+    ajustarModalDetalhe();
     document.getElementById('modalDetalhe').classList.add('show');
     calcularDistancia(e);
   });
 }
+
+// Mantém o cartão dentro da área VISÍVEL (acima do teclado), sem encolher o conteúdo
+function ajustarModalDetalhe(){
+  const ov = document.getElementById('modalDetalhe');
+  const vv = window.visualViewport;
+  if(!ov || !vv) return;
+  ov.style.top    = vv.offsetTop + 'px';
+  ov.style.height = vv.height + 'px';
+}
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', ajustarModalDetalhe);
+  window.visualViewport.addEventListener('scroll', ajustarModalDetalhe);
+}
+// ao tocar num campo, garante que ele aparece dentro do cartão
+document.getElementById('modalDetalhe').addEventListener('focusin', e=>{
+  setTimeout(()=>{ try{ e.target.scrollIntoView({block:'nearest',behavior:'smooth'}); }catch(_){} }, 320);
+});
 
 function fecharDetalhe(ev){
   if(!ev||ev.target===document.getElementById('modalDetalhe')){

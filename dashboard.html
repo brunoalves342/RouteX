@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root {
@@ -184,6 +185,18 @@ html,body{height:100%;font-family:'Inter',system-ui,sans-serif;background:#060a1
   font-family:'Inter',sans-serif;z-index:200;opacity:0;transition:all 0.22s;
   pointer-events:none;box-shadow:0 8px 32px rgba(0,0,0,0.5);}
 .toast.show{opacity:1;}
+.toast.acao{pointer-events:all;}
+.toast-btn{margin-left:14px;background:rgba(96,165,250,0.16);color:var(--accent);border:1px solid rgba(96,165,250,0.35);border-radius:10px;padding:5px 14px;font-size:12.5px;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;}
+
+/* IMPRESSÃO / PDF (fechamento do mês) */
+@media print{
+  body *{visibility:hidden !important;}
+  #modalFechamento, #modalFechamento *{visibility:visible !important;}
+  #modalFechamento{position:absolute !important;left:0;top:0;width:100%;height:auto !important;background:#fff !important;backdrop-filter:none !important;display:block !important;opacity:1 !important;}
+  #modalFechamento .modal-box{width:100% !important;max-width:none !important;max-height:none !important;box-shadow:none !important;border:none !important;background:#fff !important;}
+  #modalFechamento *{color:#111 !important;background:transparent !important;border-color:#ccc !important;}
+  .no-print{display:none !important;}
+}
 
 /* MODAL DETALHE */
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);
@@ -334,13 +347,51 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
+// ── Segurança: senha guardada só como "hash" (ninguém consegue ler a senha no banco) ──
+function sha256hex(str){
+  const K=[],H=[]; for(let n=2,c=0;c<64;n++){ let p=true; for(let d=2;d*d<=n;d++) if(n%d===0){p=false;break;} if(p){ if(c<8) H[c]=(Math.pow(n,1/2)%1*4294967296)|0; K[c]=(Math.pow(n,1/3)%1*4294967296)|0; c++; } }
+  const b=Array.from(new TextEncoder().encode(str)), bits=b.length*8;
+  b.push(0x80); while(b.length%64!==56) b.push(0);
+  b.push(0,0,0,0,(bits>>>24)&255,(bits>>>16)&255,(bits>>>8)&255,bits&255);
+  const rr=(x,n)=>(x>>>n)|(x<<(32-n)), w=new Array(64);
+  for(let i=0;i<b.length;i+=64){
+    for(let t=0;t<16;t++) w[t]=(b[i+t*4]<<24)|(b[i+t*4+1]<<16)|(b[i+t*4+2]<<8)|b[i+t*4+3];
+    for(let t=16;t<64;t++){ const s0=rr(w[t-15],7)^rr(w[t-15],18)^(w[t-15]>>>3), s1=rr(w[t-2],17)^rr(w[t-2],19)^(w[t-2]>>>10); w[t]=(w[t-16]+s0+w[t-7]+s1)|0; }
+    let [a,bb,c,d,e,f,g,h]=H;
+    for(let t=0;t<64;t++){
+      const S1=rr(e,6)^rr(e,11)^rr(e,25), ch=(e&f)^(~e&g), t1=(h+S1+ch+K[t]+w[t])|0;
+      const S0=rr(a,2)^rr(a,13)^rr(a,22), mj=(a&bb)^(a&c)^(bb&c), t2=(S0+mj)|0;
+      h=g; g=f; f=e; e=(d+t1)|0; d=c; c=bb; bb=a; a=(t1+t2)|0;
+    }
+    H[0]=(H[0]+a)|0; H[1]=(H[1]+bb)|0; H[2]=(H[2]+c)|0; H[3]=(H[3]+d)|0; H[4]=(H[4]+e)|0; H[5]=(H[5]+f)|0; H[6]=(H[6]+g)|0; H[7]=(H[7]+h)|0;
+  }
+  return H.map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
+}
+function novoSalt(){ const a=new Uint8Array(8); (window.crypto||window.msCrypto).getRandomValues(a); return Array.from(a,x=>x.toString(16).padStart(2,'0')).join(''); }
+function hashSenha(salt, senha){ return sha256hex('routex|'+salt+'|'+senha); }
+function novaCredencial(senha){ const salt=novoSalt(); return { salt, hash:hashSenha(salt,senha) }; }
+function senhaConfere(u, senha){
+  if(!u) return false;
+  if(u.hash) return hashSenha(u.salt||'', senha) === u.hash;
+  return u.senhaLegada!=null && u.senhaLegada === senha;   // perfil antigo (ainda sem hash)
+}
+
+// Login anônimo no Firebase: permite trancar o banco só pra quem passa pelo app (regras: auth != null).
+// Se o login anônimo ainda não estiver ligado no console, o painel segue funcionando normalmente.
+const _authPronta = (async()=>{
+  try{
+    if(!firebase.auth) return;
+    await Promise.race([ firebase.auth().signInAnonymously(), new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),4000)) ]);
+  }catch(e){ console.warn('Login anônimo do Firebase indisponível (normal enquanto as regras estiverem abertas):', e&&(e.code||e.message)); }
+})();
+
 // ── Usuários ──
 // Perfis padrão — só usados na 1ª vez (gravados em perfis/ no Firebase) ou se o banco estiver fora do ar
 const PERFIS_PADRAO = {
-  'adm':      { senha:'Macaco22', tipo:'adm' },
-  'Bruno':    { senha:'Macaco22', tipo:'entregador', alias:['Bruno'] },
-  'Jonathas': { senha:'ent2',     tipo:'entregador', alias:['Jonathas','Entregador2'] },
-  'Andre':    { senha:'adm2006',  tipo:'supervisor' },
+  'adm':      { salt:'a1c4e7b2', hash:'13dff378d3182dd9ebb28bcbb8dba0a79825e4e5110baaa958dbc40ca7d596cd', tipo:'adm' },
+  'Bruno':    { salt:'b2d5f8c3', hash:'256ecb07ea85de2df8a0290657d9bb146c34636e1859a7a3e4d36780df350af8', tipo:'entregador', alias:['Bruno'] },
+  'Jonathas': { salt:'c3e609d4', hash:'48f6fb66581028fe5e24b950a61ac68800545fe6068e1b8d6406a0b754da147c', tipo:'entregador', alias:['Jonathas','Entregador2'] },
+  'Andre':    { salt:'d4f71ae5', hash:'8d953eb095b8dc64c986486e2b0c050bde79e404dcc5a1628bc858c1d34d4fe1', tipo:'supervisor' },
 };
 const EMOJI_TIPO = { adm:'⚙️', entregador:'🛵', supervisor:'👀' };
 const USUARIOS = {};        // preenchido por aplicarPerfis()
@@ -349,8 +400,10 @@ const ENTREGADORES = [];    // idem (só quem é do tipo entregador)
 function aplicarPerfis(obj){
   Object.keys(USUARIOS).forEach(k=>delete USUARIOS[k]);
   Object.entries(obj||{}).forEach(([login,p])=>{
-    if(!p || p.senha==null || !EMOJI_TIPO[p.tipo]) return;
-    const u = { senha:String(p.senha), tipo:p.tipo, emoji:EMOJI_TIPO[p.tipo] };
+    if(!p || (p.hash==null && p.senha==null) || !EMOJI_TIPO[p.tipo]) return;
+    const u = { tipo:p.tipo, emoji:EMOJI_TIPO[p.tipo] };
+    if(p.hash!=null){ u.hash=String(p.hash); u.salt=String(p.salt||''); }
+    if(p.senha!=null){ u.senhaLegada=String(p.senha); u.senhaVisivel=true; }   // senha antiga em texto puro ainda no banco
     if(p.tipo==='entregador'){
       const al = Array.isArray(p.alias) ? p.alias : Object.values(p.alias||{});
       u.alias = [login, ...al.filter(a=>a && a!==login)];   // 1º = nome atual; os outros = nomes antigos (histórico)
@@ -380,6 +433,7 @@ function btnsFiltroHist(){
 
 let _perfisProntos; const _perfisPromise = new Promise(r=>{ _perfisProntos=r; });
 setTimeout(()=>_perfisProntos(), 4000);   // se o banco demorar, usa os padrões
+_authPronta.then(()=>{
 db.ref('perfis').on('value', snap=>{
   const v = snap.val();
   if(!v){
@@ -394,6 +448,68 @@ db.ref('perfis').on('value', snap=>{
     if(['perfis','visao','entregadores'].includes(paginaAtual)) renderPagina();
   }
 }, err=>{ console.error('Firebase (perfis):', err); _perfisProntos(); });
+});
+
+// Perfis antigos têm a senha em texto puro: o ADM, ao entrar, gera o hash de cada um (a senha antiga fica
+// até ele tocar em "Apagar senhas visíveis" na tela Perfis — assim celulares com versão velha do app não quebram).
+function migrarSenhasLegadas(){
+  const upd = {};
+  Object.entries(USUARIOS).forEach(([login,u])=>{
+    if(u.hash || u.senhaLegada==null) return;
+    const c = novaCredencial(u.senhaLegada);
+    upd[`${login}/hash`] = c.hash; upd[`${login}/salt`] = c.salt;
+  });
+  if(Object.keys(upd).length) db.ref('perfis').update(upd).catch(e=>console.error('Firebase (migrar senhas):', e));
+}
+function protegerSenhas(){
+  const upd = {};
+  Object.entries(USUARIOS).forEach(([login,u])=>{
+    if(!u.senhaVisivel) return;
+    if(!u.hash){ const c=novaCredencial(u.senhaLegada); upd[`${login}/hash`]=c.hash; upd[`${login}/salt`]=c.salt; }
+    upd[`${login}/senha`] = null;
+  });
+  if(!Object.keys(upd).length){ toast('✓ As senhas já estão protegidas'); return; }
+  db.ref('perfis').update(upd).then(()=>toast('🔒 Senhas protegidas!')).catch(e=>{ console.error(e); toast('❌ Não consegui proteger as senhas'); });
+}
+
+// ── Backup ──
+function perfisSemSenha(v){
+  const o = {}; Object.entries(v||{}).forEach(([k,p])=>{ if(!p) return; const c={...p}; delete c.senha; o[k]=c; }); return o;
+}
+async function fazerBackup(){
+  const [e,p] = await Promise.all([ db.ref('entregas').once('value'), db.ref('perfis').once('value') ]);
+  const chave = hoje();
+  await db.ref('backups/'+chave).set({ criadoEm:Date.now(), entregas:e.val()||{}, perfis:perfisSemSenha(p.val()) });
+  await db.ref('backups/_meta').update({ ultimo:Date.now(), ['lista/'+chave]:true });
+  const lista = Object.keys((await db.ref('backups/_meta/lista').once('value')).val()||{}).sort();   // mantém só os 4 mais recentes
+  const velhos = lista.slice(0, Math.max(0, lista.length-4));
+  if(velhos.length){
+    const upd = {}; velhos.forEach(k=>{ upd[k]=null; upd['_meta/lista/'+k]=null; });
+    await db.ref('backups').update(upd);
+  }
+}
+async function backupSeNecessario(){
+  try{
+    await _authPronta;
+    const ult = (await db.ref('backups/_meta/ultimo').once('value')).val();
+    if(ult && Date.now()-ult < 7*86400000) return;
+    await fazerBackup();
+  }catch(e){ console.warn('Backup automático:', e); }
+}
+async function backupAgora(){
+  toast('💾 Fazendo backup...');
+  try{ await fazerBackup(); toast('✓ Backup salvo no banco!'); }catch(e){ console.error(e); toast('❌ Não consegui fazer o backup'); }
+}
+async function baixarBackup(){
+  try{
+    const [e,p] = await Promise.all([ db.ref('entregas').once('value'), db.ref('perfis').once('value') ]);
+    const dados = { app:'RouteX', geradoEm:new Date().toISOString(), entregas:e.val()||{}, perfis:perfisSemSenha(p.val()) };
+    const blob = new Blob([JSON.stringify(dados,null,1)], { type:'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `routex-backup-${hoje()}.json`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+    toast('✓ Backup baixado!');
+  }catch(err){ console.error(err); toast('❌ Não consegui baixar o backup'); }
+}
 
 // ── Utils ──
 function fmt(v){ return 'R$ '+parseFloat(v||0).toFixed(2).replace('.',','); }
@@ -435,10 +551,22 @@ function normalizarRua(rua){
 }
 function ruaCompleta(r){ r=(r||'').trim(); return temPrefixoLog(r) ? r : 'Rua '+normalizarRua(r); }
 
+let _toastTimer = null;
 function toast(msg){
   const t=document.getElementById('toast');
-  t.textContent=msg; t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'),2500);
+  clearTimeout(_toastTimer);
+  t.textContent=msg; t.classList.remove('acao'); t.classList.add('show');
+  _toastTimer=setTimeout(()=>t.classList.remove('show'),2500);
+}
+function toastAcao(msg, rotulo, fn, ms){
+  const t=document.getElementById('toast');
+  clearTimeout(_toastTimer);
+  t.textContent='';
+  const sp=document.createElement('span'); sp.textContent=msg;
+  const b=document.createElement('button'); b.className='toast-btn'; b.textContent=rotulo;
+  b.onclick=()=>{ clearTimeout(_toastTimer); t.classList.remove('show','acao'); fn(); };
+  t.append(sp,b); t.classList.add('show','acao');
+  _toastTimer=setTimeout(()=>t.classList.remove('show','acao'), ms||7000);
 }
 
 // ── Login ──
@@ -453,7 +581,7 @@ async function fazerLogin(){
   const senha = document.getElementById('loginSenha').value;
   const err   = document.getElementById('loginErr');
   const user  = Object.keys(USUARIOS).find(k=>k.toLowerCase()===nome.toLowerCase());
-  if(!user||USUARIOS[user].senha!==senha){ err.textContent='Login ou senha incorretos.'; return; }
+  if(!user||!senhaConfere(USUARIOS[user], senha)){ err.textContent='Login ou senha incorretos.'; return; }
   if(USUARIOS[user].tipo==='entregador'){ err.textContent='Acesso não permitido.'; return; }
   err.textContent='';
   usuarioAtual=user;
@@ -462,6 +590,7 @@ async function fazerLogin(){
   document.getElementById('appWrap').style.display='grid';
   document.getElementById('badgeUser').textContent='⚙️ '+user;
   document.getElementById('pageDate').textContent=fmtData(hoje());
+  if(USUARIOS[user].tipo==='adm'){ migrarSenhasLegadas(); backupSeNecessario(); }
   carregarDados();
 }
 
@@ -813,6 +942,7 @@ async function excluirEntrega(){
   if(!_mdEntrega) return;
   if(!confirm(`Excluir entrega em ${_mdEntrega.rua}?`)) return;
   const path = `entregas/${_mdEntrega._owner}/${_mdEntrega._dia}/${_mdEntrega.id}`;
+  const { _user, _owner, _dia, ...copia } = _mdEntrega;          // guarda pra poder desfazer
   try{
     await db.ref(path).remove();
   }catch(err){
@@ -820,9 +950,49 @@ async function excluirEntrega(){
     toast('❌ Erro ao excluir. Tente de novo.');
     return;
   }
-  toast('✓ Entrega excluída!');
+  toastAcao('✓ Entrega excluída', '↩ Desfazer', async()=>{
+    try{ await db.ref(path).set(copia); toast('✓ Entrega restaurada!'); await carregarDados(); }
+    catch(err){ console.error(err); toast('❌ Não consegui restaurar'); }
+  }, 8000);
   document.getElementById('modalDetalhe').classList.remove('show');
   await carregarDados();
+}
+
+// ── FECHAMENTO DO MÊS ──
+function abrirFechamento(ym){
+  const todas = getTodasEntregas();
+  const por = {}; let totEnt = 0, totVal = 0;
+  Object.entries(todas).forEach(([dia,ents])=>{
+    if(dia.slice(0,7)!==ym) return;
+    Object.values(ents).forEach(e=>{
+      const u = e._user; if(!por[u]) por[u] = { n:0, soma:0, dias:new Set() };
+      por[u].n++; por[u].soma += Number(e.taxa)||0; por[u].dias.add(dia); totEnt++; totVal += Number(e.taxa)||0;
+    });
+  });
+  const NM=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const [yy,mm] = ym.split('-'); const nomeMes = `${NM[parseInt(mm)-1]} ${yy}`;
+  const linhas = Object.entries(por).sort(([a],[b])=>a.localeCompare(b));
+  window._fechTexto = `*RouteX — Fechamento de ${nomeMes}*\n\n` + linhas.map(([u,l])=>`🛵 ${u}: ${l.n} entregas · ${fmt(l.soma)}`).join('\n') + `\n\n*Total: ${totEnt} entregas · ${fmt(totVal)}*`;
+  const old = document.getElementById('modalFechamento'); if(old) old.remove();
+  const div = document.createElement('div');
+  div.id = 'modalFechamento'; div.className = 'modal-bg show';
+  div.onclick = e=>{ if(e.target===div) div.remove(); };
+  div.innerHTML = `<div class="modal-box" style="width:460px;">
+    <div class="modal-title">📤 Fechamento — ${nomeMes}</div>
+    <div class="modal-sub">Total por entregador no mês</div>
+    ${linhas.length ? linhas.map(([u,l])=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:rgba(255,255,255,0.03);border-radius:12px;margin-bottom:8px;">
+        <div><div style="font-size:14px;font-weight:800;">🛵 ${escHtml(u)}</div><div style="font-size:11px;color:var(--text2);margin-top:2px;">${l.n} entregas · ${l.dias.size} ${l.dias.size===1?'dia':'dias'}</div></div>
+        <div style="font-size:16px;font-weight:900;color:var(--green);">${fmt(l.soma)}</div></div>`).join('') +
+      `<div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.18);border-radius:12px;margin:12px 0 18px;">
+        <span style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;">Total geral · ${totEnt} entregas</span>
+        <span style="font-size:22px;font-weight:900;color:var(--green);">${fmt(totVal)}</span></div>`
+      : `<div style="text-align:center;padding:30px 0;color:var(--text2);">Nenhuma entrega em ${nomeMes}.</div>`}
+    <div class="modal-actions no-print">
+      <button class="btn-cancel" onclick="document.getElementById('modalFechamento').remove()">Fechar</button>
+      ${linhas.length ? `<button class="btn-cancel" onclick="window.print()">📄 Salvar PDF</button>
+      <button class="btn-save" onclick="window.open('https://wa.me/?text='+encodeURIComponent(window._fechTexto),'_blank')">💬 WhatsApp</button>` : ''}
+    </div></div>`;
+  document.body.appendChild(div);
 }
 
 // ── ENTREGADORES ──
@@ -1138,14 +1308,22 @@ function selecionarTipo(tipo){
 function renderPerfis(){
   // Mostra tudo direto — sem precisar clicar nos grupos
   let html = `
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+  ${Object.values(_perfisDB).some(u=>u.senhaVisivel) ? `<div style="background:rgba(251,191,36,0.07);border:1px solid rgba(251,191,36,0.35);border-radius:14px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;gap:16px;">
+    <div><div style="font-size:13px;font-weight:800;margin-bottom:3px;">🔓 Senhas ainda visíveis no banco</div>
+    <div style="font-size:12px;color:var(--text2);line-height:1.5;">Já gerei a versão protegida de todas. Quando <b>todo mundo</b> estiver com o app atualizado, clique ao lado para apagar as senhas em texto puro do banco.</div></div>
+    <button onclick="protegerSenhas()" style="background:linear-gradient(135deg,#3b6ef0,#818cf8);color:#fff;border:none;border-radius:10px;padding:9px 18px;font-size:13px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;white-space:nowrap;">🔒 Apagar senhas visíveis</button></div>` : ''}
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;">
     <div style="font-size:13px;color:var(--text2);">Gerencie todos os perfis do sistema</div>
+    <div style="display:flex;gap:8px;">
+    <button onclick="baixarBackup()" title="Baixa um arquivo com todas as entregas e perfis"
+      style="background:rgba(96,165,250,0.12);color:var(--accent);border:1px solid rgba(96,165,250,0.3);
+      border-radius:10px;padding:9px 16px;font-size:13px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;">💾 Baixar backup</button>
     <button onclick="abrirModalNovoPerfil()"
       style="background:linear-gradient(135deg,#3b6ef0,#818cf8);color:#fff;border:none;
       border-radius:10px;padding:9px 18px;font-size:13px;font-weight:700;
       font-family:'Inter',sans-serif;cursor:pointer;">
       ＋ Novo perfil
-    </button>
+    </button></div>
   </div>`;
 
   // Grid com 3 colunas — uma por grupo
@@ -1192,9 +1370,7 @@ function renderPerfis(){
             <div style="display:flex;justify-content:space-between;align-items:center;">
               <span style="font-size:11px;color:var(--text2);">Senha</span>
               <div style="display:flex;align-items:center;gap:6px;">
-                <span style="font-size:12px;font-weight:700;" id="senhaVal_${user}">••••••</span>
-                <button onclick="toggleVerSenha('${user}')"
-                  style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--text2);">👁️</button>
+                <span style="font-size:12px;font-weight:700;">🔒 protegida</span>
               </div>
             </div>
           </div>
@@ -1256,14 +1432,12 @@ function abrirGrupoPerfil(grupoId){
             <div style="display:flex;gap:20px;align-items:center;">
               <div class="perfil-dado">Login: <span>${user}</span></div>
               <div class="perfil-dado">Senha:
-                <span id="senhaVal_${user}">••••••</span>
-                <button onclick="toggleVerSenha('${user}')"
-                  style="background:none;border:none;cursor:pointer;font-size:13px;margin-left:4px;color:var(--text2);">👁️</button>
+                <span>🔒 protegida</span>
               </div>
             </div>
             <div class="edit-senha-form" id="formSenha_${user}" style="margin-top:10px;">
               <div class="edit-senha-row">
-                <input class="modal-input" type="text" id="inputSenha_${user}" value="${info.senha}" style="flex:1;" />
+                <input class="modal-input" type="text" id="inputSenha_${user}" value="" placeholder="Nova senha" style="flex:1;" />
                 <button class="btn-save" style="padding:9px 16px;" onclick="salvarSenha('${user}')">✓ Salvar</button>
                 <button class="btn-cancel" style="padding:9px 12px;" onclick="toggleEditSenha('${user}')">✕</button>
               </div>
@@ -1287,7 +1461,6 @@ function excluirPerfil(user){
 
 function abrirModalEditarPerfil(user, senha, tipo){
   const _inf = _perfisDB[user]||{};
-  senha = _inf.senha!=null ? _inf.senha : senha;
   tipo  = _inf.tipo  || tipo;
   const modal = document.getElementById('modalEditarPerfil');
   if(modal) modal.remove();
@@ -1309,7 +1482,7 @@ function abrirModalEditarPerfil(user, senha, tipo){
       <div class="modal-field">
         <div class="modal-label">Senha</div>
         <div style="position:relative;">
-          <input class="modal-input" type="text" id="editSenha" value="${escHtml(senha)}" placeholder="Senha" style="padding-right:40px;" />
+          <input class="modal-input" type="text" id="editSenha" value="" placeholder="Deixe em branco para manter a senha atual" autocomplete="off" style="padding-right:40px;" />
         </div>
       </div>
 
@@ -1378,13 +1551,15 @@ function salvarEdicaoPerfil(loginAntigo){
 
   if(!novoLogin){ err.textContent='⚠️ Digite um login!'; return; }
   if(LOGIN_INVALIDO.test(novoLogin)){ err.textContent='⚠️ O login não pode ter aspas, ponto, # $ [ ] / < > & ou barra.'; return; }
-  if(!novaSenha){ err.textContent='⚠️ Digite uma senha!'; return; }
   if(infoAntiga.tipo==='adm' && novoLogin!==loginAntigo){ err.textContent='⚠️ O login do administrador não pode mudar.'; return; }
   if(novoLogin.toLowerCase()!==loginAntigo.toLowerCase() && Object.keys(_perfisDB).some(k=>k.toLowerCase()===novoLogin.toLowerCase())){
     err.textContent='⚠️ Já existe um perfil com esse login!'; return;
   }
 
-  const novo = { senha: novaSenha, tipo: novoTipo };
+  // senha em branco = mantém a atual (o hash vai junto, mesmo se o login mudar)
+  const cred = novaSenha ? novaCredencial(novaSenha)
+    : (infoAntiga.hash ? { hash:infoAntiga.hash, salt:infoAntiga.salt||'' } : novaCredencial(infoAntiga.senhaLegada));
+  const novo = { hash: cred.hash, salt: cred.salt, tipo: novoTipo };
   if(novoTipo==='entregador'){
     // se renomeou, as entregas continuam gravadas no nome antigo: guarda como "alias" pra não perder o histórico
     const antigos = infoAntiga.tipo==='entregador' ? aliasesDe(loginAntigo) : [];
@@ -1474,7 +1649,8 @@ function criarNovoPerfil(){
   if(Object.keys(_perfisDB).some(k=>k.toLowerCase()===login.toLowerCase())){ err.textContent='⚠️ Já existe um perfil com esse login!'; return; }
   if(tipo!=='entregador' && tipo!=='supervisor'){ err.textContent='⚠️ Tipo inválido.'; return; }
 
-  const novo = { senha, tipo };
+  const cred = novaCredencial(senha);
+  const novo = { hash: cred.hash, salt: cred.salt, tipo };
   if(tipo==='entregador') novo.alias = [login];
   db.ref(`perfis/${login}`).set(novo).then(()=>{
     toast(`✓ Perfil de ${login} criado!`);
@@ -1483,11 +1659,7 @@ function criarNovoPerfil(){
 }
 
 let _senhaVis = {};
-function toggleVerSenha(user, senha){
-  if(_perfisDB[user]) senha = _perfisDB[user].senha;
-  _senhaVis[user] = !_senhaVis[user];
-  document.getElementById(`senhaVal_${user}`).textContent = _senhaVis[user] ? senha : '••••••';
-}
+function toggleVerSenha(){ /* senhas agora são protegidas: não dá mais pra ver */ }
 function toggleEditSenha(user){
   const f = document.getElementById(`formSenha_${user}`);
   f.style.display = f.style.display === 'none' || !f.style.display ? 'block' : 'none';
@@ -1496,8 +1668,8 @@ const LOGIN_INVALIDO = /['"<>&\\.$#\[\]\/]/;
 function salvarSenha(user){
   const nova = document.getElementById(`inputSenha_${user}`).value.trim();
   if(!nova){ toast('⚠️ Digite uma senha!'); return; }
-  USUARIOS[user] = USUARIOS[user] || {};
-  USUARIOS[user].senha = nova;
+  const c = novaCredencial(nova);
+  db.ref(`perfis/${user}`).update({ hash:c.hash, salt:c.salt, senha:null }).catch(e=>console.error(e));
   toast(`✓ Senha de ${user} atualizada!`);
   toggleEditSenha(user);
   renderPerfis();
@@ -1691,6 +1863,7 @@ function renderHistorico(){
           <div style="font-size:15px;font-weight:800;letter-spacing:-0.3px;">${mes.label}</div>
         </div>
         <div style="display:flex;align-items:center;gap:16px;">
+          <button onclick="abrirFechamento('${mes.ano}-${mes.mes}')" style="background:rgba(52,211,153,0.1);color:var(--green);border:1px solid rgba(52,211,153,0.3);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;">📤 Fechamento</button>
           <div style="font-size:12px;color:var(--text2);">${totalEnts} entregas</div>
           <div style="font-size:14px;font-weight:800;color:var(--green);">${fmt(totalMes)}</div>
         </div>

@@ -1166,6 +1166,7 @@ document.getElementById('inputTaxa').addEventListener('keydown', e=>{ if(e.key==
 let abaAtiva = 'hoje';
 
 function trocarAba(aba){
+  sairModoRota();
   abaAtiva = aba;
   const btnHoje = document.getElementById('abaHoje');
   const btnAnt  = document.getElementById('abaAnteriores');
@@ -1190,6 +1191,7 @@ function trocarAba(aba){
 }
 
 function abrirHistorico(){
+  sairModoRota();
   abaAtiva = 'hoje';
   // reseta visual das abas
   trocarAba('hoje');
@@ -1197,8 +1199,50 @@ function abrirHistorico(){
 }
 
 function fecharHistorico(ev){
-  if(!ev||ev.target===document.getElementById('modalHistorico'))
+  if(!ev||ev.target===document.getElementById('modalHistorico')){
+    sairModoRota();
     document.getElementById('modalHistorico').classList.remove('show');
+  }
+}
+
+// ── Rota com várias entregas (Google Maps) ──
+// Marca as entregas na ordem que quer passar; a última marcada vira o destino final.
+// Limite do Maps no celular: 3 paradas no meio + destino = 4 entregas.
+const MAX_PARADAS_ROTA = 4;
+let _modoRota = false;
+let _rotaSel  = [];   // ids na ordem marcada
+
+function sairModoRota(){ _modoRota = false; _rotaSel = []; }
+
+function toggleModoRota(){
+  _modoRota = !_modoRota;
+  _rotaSel = [];
+  renderHistorico();
+}
+
+function selecionarParaRota(id){
+  id = String(id);
+  const k = _rotaSel.indexOf(id);
+  if(k>=0) _rotaSel.splice(k,1);
+  else {
+    if(_rotaSel.length >= MAX_PARADAS_ROTA){ toast(`⚠️ O Google Maps no celular aceita até ${MAX_PARADAS_ROTA} paradas por rota`); return; }
+    _rotaSel.push(id);
+  }
+  const sc = document.getElementById('histScroll'); const top = sc.scrollTop;
+  renderHistorico();
+  sc.scrollTop = top;
+}
+
+function abrirRotaMultipla(){
+  const sel = _rotaSel.map(id=>entregasLocal.find(e=>String(e.id)===id)).filter(Boolean);
+  if(!sel.length) return;
+  const addr = e => `${e.rua}, ${(e.numero && e.numero!=='S/N') ? e.numero+', ' : ''}Londrina, PR, Brasil`;
+  const destino = addr(sel[sel.length-1]);
+  const paradas = sel.slice(0,-1).map(addr);
+  // sem "origin": o Maps parte da localização atual do celular
+  let url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destino)}&travelmode=driving`;
+  if(paradas.length) url += `&waypoints=${paradas.map(encodeURIComponent).join('%7C')}`;
+  window.open(url,'_blank');
 }
 
 function renderHistorico(){
@@ -1207,11 +1251,44 @@ function renderHistorico(){
   document.getElementById('histCount').textContent = total+(total===1?' entrega':' entregas');
   const el = document.getElementById('histScroll');
   if(total===0){
+    sairModoRota();
     el.innerHTML=`<div class="hist-empty"><div class="ei">📋</div><p>Nenhuma entrega hoje.</p></div>`;
     return;
   }
-  el.innerHTML = [...lista].reverse().map((e,i)=>{
+  // some da seleção quem foi excluído
+  _rotaSel = _rotaSel.filter(id=>lista.some(e=>String(e.id)===id));
+
+  // barra do topo: só aparece com 2+ entregas
+  let barra = '';
+  if(total >= 2){
+    const btnBase = "border-radius:12px;padding:10px 12px;font-size:12.5px;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;";
+    barra = `<div style="position:sticky;top:0;z-index:2;background:rgba(8,13,30,0.97);padding:0 0 10px;display:flex;gap:8px;">
+      <button onclick="toggleModoRota()" style="${btnBase}flex:${_modoRota?'0 0 auto':'1'};
+        ${_modoRota ? 'background:rgba(255,255,255,0.06);color:var(--text2);border:1px solid rgba(255,255,255,0.12);' : 'background:linear-gradient(135deg,rgba(96,165,250,0.15),rgba(129,140,248,0.1));color:var(--accent);border:1px solid rgba(96,165,250,0.3);'}">
+        ${_modoRota ? '✕ Cancelar' : '🗺️ Rota com várias entregas'}</button>
+      ${_modoRota ? `<button onclick="abrirRotaMultipla()" ${_rotaSel.length?'':'disabled'} style="${btnBase}flex:1;border:none;
+        ${_rotaSel.length ? 'background:linear-gradient(135deg,#059669,#34d399);color:#04130d;' : 'background:rgba(255,255,255,0.05);color:var(--text2);'}">
+        ${_rotaSel.length ? `🗺️ Abrir rota (${_rotaSel.length} ${_rotaSel.length===1?'parada':'paradas'})` : 'Toque nas entregas, na ordem'}</button>` : ''}
+    </div>`;
+  }
+
+  el.innerHTML = barra + [...lista].reverse().map((e,i)=>{
     const num = total-i;
+    if(_modoRota){
+      const ordem = _rotaSel.indexOf(String(e.id)) + 1;
+      const marcado = ordem > 0;
+      return `<div class="hist-card" onclick="selecionarParaRota('${jsStr(e.id)}')"
+        style="${marcado ? 'border-color:rgba(52,211,153,0.6);background:rgba(52,211,153,0.08);' : ''}">
+        <div class="hc-num" style="${marcado ? 'background:linear-gradient(135deg,#059669,#34d399);color:#04130d;' : 'background:rgba(255,255,255,0.05);color:var(--text2);'}">${marcado ? ordem : '○'}</div>
+        <div class="hc-info">
+          <div class="hc-addr">${escHtml(e.rua)}</div>
+          <div class="hc-time">nº ${escHtml(e.numero)} · 🕐 ${fmtHora(e.ts)}</div>
+        </div>
+        <div class="hc-right">
+          <div class="hc-taxa">${fmt(e.taxa)}</div>
+        </div>
+      </div>`;
+    }
     return `<div class="hist-card" onclick="abrirDetalhe('${jsStr(e.id)}','${usuarioAtual}','${hoje()}')">
       <div class="hc-num">${num}</div>
       <div class="hc-info">
@@ -1352,6 +1429,7 @@ function abrirDetalhe(id, user, data){
       : 'Taxa da entrega';
 
     const podeExcluir = tipo==='adm' || (USUARIOS[usuarioAtual].alias||[usuarioAtual]).includes(user);
+    resetarExcluir();
     document.getElementById('btnExcluir').style.display = podeExcluir ? '' : 'none';
 
     document.getElementById('modalDetalhe').classList.add('show');
@@ -1365,6 +1443,7 @@ function fecharDetalhe(ev){
     document.getElementById('detDistBox').style.display='none';
     fecharEditTaxa();
     cancelarEditEndereco();
+    resetarExcluir();
     idAtual=null; entAtual=null;
   }
 }
@@ -1439,8 +1518,28 @@ function fecharEditTaxa(){
 }
 
 // ── Excluir ──
+// Exclusão em 2 toques: o 1º só "arma" o botão, o 2º (dentro de 4s) exclui de verdade
+let _excluirArmadoEm = 0, _excluirTimer = null;
+function resetarExcluir(){
+  _excluirArmadoEm = 0;
+  clearTimeout(_excluirTimer);
+  const b = document.getElementById('btnExcluir');
+  if(b){ b.textContent = '🗑 Excluir esta entrega'; b.style.background = ''; b.style.color = ''; b.style.borderColor = ''; }
+}
 function excluirAtual(){
   if(!idAtual||!entAtual) return;
+  const agora = Date.now();
+  if(!_excluirArmadoEm){
+    // 1º toque: pede confirmação
+    _excluirArmadoEm = agora;
+    const b = document.getElementById('btnExcluir');
+    b.textContent = '⚠️ Toque de novo para EXCLUIR';
+    b.style.background = 'rgba(248,113,113,0.35)'; b.style.color = '#fff'; b.style.borderColor = 'rgba(248,113,113,0.8)';
+    _excluirTimer = setTimeout(resetarExcluir, 4000);
+    return;
+  }
+  if(agora - _excluirArmadoEm < 500) return;   // duplo toque sem querer não conta
+  resetarExcluir();
   db.ref(`entregas/${entAtual._user}/${entAtual._data}/${idAtual}`).remove().catch(err=>{ console.error(err); toast('❌ Erro ao remover a entrega'); });
   document.getElementById('modalDetalhe').classList.remove('show');
   idAtual=null; entAtual=null;

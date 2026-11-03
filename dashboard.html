@@ -363,6 +363,30 @@ function inicioMesFiltro(){
 }
 
 function semAcento(s){ return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+function removerAcentos(s){ return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+
+// Escapa texto vindo do banco antes de colocar em innerHTML
+function escHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+// Texto seguro pra ir dentro de aspas simples num onclick=""
+function jsStr(s){
+  return String(s==null?'':s).replace(/[^A-Za-z0-9_\-. ]/g, c=>{
+    const n=c.charCodeAt(0);
+    return n<256 ? '\\x'+n.toString(16).padStart(2,'0') : '\\u'+n.toString(16).padStart(4,'0');
+  });
+}
+// Objeto -> literal seguro dentro de onclick="f(...)"
+function jsonAttr(o){ return JSON.stringify(o).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+// Mesma padronização do app: "Marfim" e "Rua Marfim" são o mesmo endereço
+function temPrefixoLog(s){
+  return /^(rua|av|avenida|alameda|travessa|praca|praça)(?![a-zA-Z\u00c0-\u00ff])/i.test((s||'').trim());
+}
+function normalizarRua(rua){
+  return (rua||'').trim().replace(/^(rua|r\.|av\.|av |avenida|alameda|al\.|travessa|tv\.|pra[cç]a|p[cç]a\.)\s+/i,'').trim();
+}
+function ruaCompleta(r){ r=(r||'').trim(); return temPrefixoLog(r) ? r : 'Rua '+normalizarRua(r); }
 
 function toast(msg){
   const t=document.getElementById('toast');
@@ -405,9 +429,16 @@ function sair(){
 
 // ── Carregar dados ──
 async function carregarDados(){
-  document.getElementById('content').innerHTML='<div class="loading">🔄 Carregando dados...</div>';
-  const snap = await db.ref('entregas').once('value');
-  allData = snap.val()||{};
+  const c=document.getElementById('content');
+  c.innerHTML='<div class="loading">🔄 Carregando dados...</div>';
+  try{
+    const snap = await db.ref('entregas').once('value');
+    allData = snap.val()||{};
+  }catch(err){
+    console.error('Firebase:', err);
+    c.innerHTML='<div class="loading" style="flex-direction:column;text-align:center;line-height:1.7;">⚠️ Não consegui carregar os dados do Firebase.<br><small>'+escHtml(err&&err.message||err)+'</small><br>Confira a internet e as regras do banco e clique em 🔄 Atualizar.</div>';
+    return;
+  }
   renderPagina();
 }
 
@@ -423,6 +454,9 @@ function setPage(p){
 }
 
 function renderPagina(){
+  // destrói gráficos da tela anterior (evita acumular na memória)
+  try{ if(window.Chart && Chart.instances) Object.values(Chart.instances).forEach(c=>c.destroy()); }catch(e){}
+  chartInstance=null;
   if(paginaAtual==='visao')           renderVisao();
   else if(paginaAtual==='entregadores') renderEntregadores();
   else if(paginaAtual==='enderecos')    renderEnderecosEdit();
@@ -431,11 +465,22 @@ function renderPagina(){
 }
 
 // ── Pega entregas de um user (com aliases) ──
+const ALIASES_BASE = { 'Jonathas':['Jonathas','Entregador2'], 'Bruno':['Bruno'] };
+function aliasesDe(user){ return ALIASES_BASE[user]||[user]; }
+
+// Junta as entregas dos aliases POR DIA (antes, se os dois tinham o mesmo dia, um apagava o outro)
+// e marca em _owner de qual pasta do Firebase cada entrega realmente é (pra editar/excluir no lugar certo)
 function getEntregasUser(user){
-  const aliases = { 'Jonathas':['Jonathas','Entregador2'], 'Bruno':['Bruno'] };
-  const keys = aliases[user]||[user];
   const result={};
-  keys.forEach(k=>{ if(allData[k]) Object.assign(result,allData[k]); });
+  aliasesDe(user).forEach(k=>{
+    const dias=allData[k];
+    if(!dias||typeof dias!=='object') return;
+    Object.entries(dias).forEach(([dia,ents])=>{
+      if(!ents||typeof ents!=='object') return;
+      if(!result[dia]) result[dia]={};
+      Object.entries(ents).forEach(([id,e])=>{ if(e&&typeof e==='object') result[dia][id]={...e,_owner:k}; });
+    });
+  });
   return result;
 }
 
@@ -469,7 +514,7 @@ function renderVisao(){
 
   // Endereços únicos
   const endUnicos=new Set();
-  diasFiltrados.forEach(([,ents])=>Object.values(ents).forEach(e=>{ if(e.rua) endUnicos.add(semAcento(e.rua.trim())+'|'+(e.numero||'')); }));
+  diasFiltrados.forEach(([,ents])=>Object.values(ents).forEach(e=>{ if(e.rua) endUnicos.add(semAcento(ruaCompleta(e.rua))+'|'+(e.numero||'')); }));
 
   // Hoje
   const hj=hoje();
@@ -490,8 +535,8 @@ function renderVisao(){
   const endMap={};
   diasFiltrados.forEach(([,ents])=>Object.values(ents).forEach(e=>{
     if(!e.rua) return;
-    const k=semAcento(e.rua.trim())+'|'+(e.numero||'');
-    if(!endMap[k]) endMap[k]={rua:e.rua.trim(),numero:e.numero||'S/N',taxa:e.taxa||0,count:0};
+    const k=semAcento(ruaCompleta(e.rua))+'|'+(e.numero||'');
+    if(!endMap[k]) endMap[k]={rua:ruaCompleta(e.rua),numero:e.numero||'S/N',taxa:e.taxa||0,count:0};
     endMap[k].count++;
     endMap[k].taxa=e.taxa||endMap[k].taxa;
   }));
@@ -559,7 +604,7 @@ function renderVisao(){
         <div class="card-title">Entregadores hoje</div>
         ${ENTREGADORES.map((u,i)=>`
           <div class="ent-row" style="cursor:pointer;" onclick="toggleHojeDetail('hoje_${u}')">
-            <div class="ent-avatar" style="${avColors[i]}">${u.substring(0,2).toUpperCase()}</div>
+            <div class="ent-avatar" style="${avColors[i%avColors.length]}">${u.substring(0,2).toUpperCase()}</div>
             <div class="ent-info">
               <div class="ent-name">${u}</div>
               <div class="ent-detail">${entHoje[u]?.lista.length||0} entregas hoje</div>
@@ -573,12 +618,12 @@ function renderVisao(){
             ${(entHoje[u]?.lista||[]).map((e,j)=>`
               <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;
                 background:rgba(255,255,255,0.02);border-radius:8px;margin-bottom:3px;cursor:pointer;"
-                onclick="event.stopPropagation();abrirDetalhe(${JSON.stringify(e).replace(/"/g,'&quot;')},'${u}','${hj}')">
+                onclick="event.stopPropagation();abrirDetalhe(${jsonAttr(e)},'${u}','${hj}')">
                 <div style="width:18px;height:18px;background:rgba(96,165,250,0.1);border-radius:5px;
                   display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;
                   color:var(--accent);flex-shrink:0;">${j+1}</div>
                 <div style="flex:1;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                  ${e.rua||''}, nº ${e.numero||''}</div>
+                  ${escHtml(e.rua||'')}, nº ${escHtml(e.numero||'')}</div>
                 <div style="font-size:12px;font-weight:700;color:var(--green);">${fmt(e.taxa||0)}</div>
                 <div style="font-size:11px;color:var(--text2);">✏️</div>
               </div>`).join('')}
@@ -600,7 +645,7 @@ function renderVisao(){
               color:var(--accent);flex-shrink:0;">${i+1}</div>
             <div style="flex:1;min-width:0;">
               <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;
-                text-overflow:ellipsis;">${e.rua}, nº ${e.numero}</div>
+                text-overflow:ellipsis;">${escHtml(e.rua)}, nº ${escHtml(e.numero)}</div>
               <div style="height:3px;background:rgba(255,255,255,0.05);border-radius:2px;margin-top:3px;">
                 <div style="height:100%;border-radius:2px;width:${Math.round(e.count/maxCount*100)}%;
                   background:linear-gradient(90deg,#3b6ef0,#818cf8);"></div>
@@ -677,7 +722,7 @@ function setFiltro(m){ filtroMeses=m; renderPagina(); }
 let _mdEntrega = null;
 
 function abrirDetalhe(entrega, user, dia){
-  _mdEntrega = { ...entrega, _user: user, _dia: dia };
+  _mdEntrega = { ...entrega, _user: user, _owner: entrega._owner||user, _dia: dia };
   document.getElementById('mdTitle').textContent = `Entrega #${entrega.id||''}`;
   document.getElementById('mdSub').textContent = `${user} · ${fmtData(dia)} · ${fmtHora(entrega.ts||0)}`;
   document.getElementById('mdRua').value    = entrega.rua||'';
@@ -693,14 +738,23 @@ function fecharModal(ev){
 
 async function salvarEntrega(){
   if(!_mdEntrega) return;
-  const novaRua   = document.getElementById('mdRua').value.trim();
+  const novaRua   = removerAcentos(document.getElementById('mdRua').value.trim());
   const novoNum   = document.getElementById('mdNumero').value.trim();
   const novaTaxa  = parseFloat(document.getElementById('mdTaxa').value);
   if(!novaRua){ toast('⚠️ Digite a rua!'); return; }
-  if(isNaN(novaTaxa)){ toast('⚠️ Taxa inválida!'); return; }
+  if(isNaN(novaTaxa)||novaTaxa<0){ toast('⚠️ Taxa inválida!'); return; }
 
-  const path = `entregas/${_mdEntrega._user}/${_mdEntrega._dia}/${_mdEntrega.id}`;
-  await db.ref(path).update({ rua: novaRua, numero: novoNum, taxa: novaTaxa });
+  const path = `entregas/${_mdEntrega._owner}/${_mdEntrega._dia}/${_mdEntrega.id}`;
+  try{
+    // não recria uma entrega que já foi apagada (update em caminho vazio cria registro incompleto)
+    const ex = await db.ref(path).once('value');
+    if(!ex.val()){ toast('⚠️ Essa entrega não existe mais'); document.getElementById('modalDetalhe').classList.remove('show'); await carregarDados(); return; }
+    await db.ref(path).update({ rua: novaRua, numero: novoNum, taxa: novaTaxa });
+  }catch(err){
+    console.error('Firebase:', err);
+    toast('❌ Erro ao salvar. Tente de novo.');
+    return;
+  }
 
   toast('✓ Entrega atualizada!');
   document.getElementById('modalDetalhe').classList.remove('show');
@@ -710,8 +764,14 @@ async function salvarEntrega(){
 async function excluirEntrega(){
   if(!_mdEntrega) return;
   if(!confirm(`Excluir entrega em ${_mdEntrega.rua}?`)) return;
-  const path = `entregas/${_mdEntrega._user}/${_mdEntrega._dia}/${_mdEntrega.id}`;
-  await db.ref(path).remove();
+  const path = `entregas/${_mdEntrega._owner}/${_mdEntrega._dia}/${_mdEntrega.id}`;
+  try{
+    await db.ref(path).remove();
+  }catch(err){
+    console.error('Firebase:', err);
+    toast('❌ Erro ao excluir. Tente de novo.');
+    return;
+  }
   toast('✓ Entrega excluída!');
   document.getElementById('modalDetalhe').classList.remove('show');
   await carregarDados();
@@ -769,9 +829,9 @@ function renderEntregadores(){
       <div style="background:var(--glass);border:1px solid var(--glass-border);border-radius:14px;
         padding:14px 16px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;align-items:center;gap:10px;">
-          <div style="width:40px;height:40px;border-radius:11px;background:${cores[idx].bg};
+          <div style="width:40px;height:40px;border-radius:11px;background:${cores[idx%cores.length].bg};
             display:flex;align-items:center;justify-content:center;font-size:14px;
-            font-weight:900;color:${cores[idx].clr};">${u.substring(0,2).toUpperCase()}</div>
+            font-weight:900;color:${cores[idx%cores.length].clr};">${u.substring(0,2).toUpperCase()}</div>
           <div>
             <div style="font-size:16px;font-weight:900;">${u}</div>
             <div style="font-size:11px;color:var(--text2);">Total: <span style="color:var(--green);font-weight:700;">${fmt(soma)}</span></div>
@@ -790,7 +850,7 @@ function renderEntregadores(){
         ${[
           {label:'Entregas',val:total,cor:'var(--text)'},
           {label:'Total taxas',val:fmt(soma),cor:'var(--green)'},
-          {label:'Taxa média',val:fmt(media),cor:cores[idx].clr},
+          {label:'Taxa média',val:fmt(media),cor:cores[idx%cores.length].clr},
           {label:'Média/dia',val:mediaDia.toFixed(1),cor:'var(--text)'}
         ].map(m=>`
         <div style="background:var(--glass);border:1px solid var(--glass-border);border-radius:11px;
@@ -820,16 +880,16 @@ function renderEntregadores(){
             <div style="margin-bottom:${i<2?'10px':'0'};">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
                 <div style="display:flex;align-items:center;gap:6px;min-width:0;flex:1;">
-                  <div style="width:15px;height:15px;border-radius:4px;background:${cores[idx].bg};
+                  <div style="width:15px;height:15px;border-radius:4px;background:${cores[idx%cores.length].bg};
                     display:flex;align-items:center;justify-content:center;font-size:9px;
-                    font-weight:800;color:${cores[idx].clr};flex-shrink:0;">${i+1}</div>
-                  <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e.rua}</div>
+                    font-weight:800;color:${cores[idx%cores.length].clr};flex-shrink:0;">${i+1}</div>
+                  <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(e.rua)}</div>
                 </div>
                 <div style="font-size:11px;font-weight:700;color:var(--text2);margin-left:8px;flex-shrink:0;">${e.count}x</div>
               </div>
               <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:2px;">
                 <div style="height:100%;border-radius:2px;width:${Math.round(e.count/maxEnd*100)}%;
-                  background:linear-gradient(90deg,${cores[idx].grad});"></div>
+                  background:linear-gradient(90deg,${cores[idx%cores.length].grad});"></div>
               </div>
             </div>`).join('')}
       </div>
@@ -891,8 +951,8 @@ function renderEnderecos(){
   const endMap={};
   diasFilt.forEach(([,ents])=>Object.values(ents).forEach(e=>{
     if(!e.rua) return;
-    const k=semAcento(e.rua.trim())+'|'+(e.numero||'');
-    if(!endMap[k]) endMap[k]={rua:e.rua.trim(),numero:e.numero||'S/N',taxa:e.taxa||0,count:0};
+    const k=semAcento(ruaCompleta(e.rua))+'|'+(e.numero||'');
+    if(!endMap[k]) endMap[k]={rua:ruaCompleta(e.rua),numero:e.numero||'S/N',taxa:e.taxa||0,count:0};
     endMap[k].count++;
     endMap[k].taxa=e.taxa||endMap[k].taxa;
   }));
@@ -918,7 +978,7 @@ function renderEnderecos(){
         ${sorted.map((e,i)=>`
           <div class="end-row">
             <div class="end-rank">${i+1}</div>
-            <div class="end-name" style="font-size:13px;">${e.rua}, nº ${e.numero}</div>
+            <div class="end-name" style="font-size:13px;">${escHtml(e.rua)}, nº ${escHtml(e.numero)}</div>
             <div class="end-bar-wrap" style="width:120px;"><div class="end-bar" style="width:${Math.round(e.count/maxCount*100)}%"></div></div>
             <div class="end-count">${e.count}x</div>
             <div class="end-taxa" style="width:60px;">${fmt(e.taxa)}</div>
@@ -936,7 +996,7 @@ function filtrarEnd(txt){
   document.getElementById('endList').innerHTML=filtrados.map((e,i)=>`
     <div class="end-row">
       <div class="end-rank">${i+1}</div>
-      <div class="end-name" style="font-size:13px;">${e.rua}, nº ${e.numero}</div>
+      <div class="end-name" style="font-size:13px;">${escHtml(e.rua)}, nº ${escHtml(e.numero)}</div>
       <div class="end-bar-wrap" style="width:120px;"><div class="end-bar" style="width:${Math.round(e.count/window._endMax*100)}%"></div></div>
       <div class="end-count">${e.count}x</div>
       <div class="end-taxa" style="width:60px;">${fmt(e.taxa)}</div>
@@ -1036,7 +1096,10 @@ function renderPerfis(){
   // Mostra tudo direto — sem precisar clicar nos grupos
   let html = `
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-    <div style="font-size:13px;color:var(--text2);">Gerencie todos os perfis do sistema</div>
+    <div>
+      <div style="font-size:13px;color:var(--text2);">Gerencie todos os perfis do sistema</div>
+      <div style="font-size:11px;color:var(--yellow);margin-top:3px;opacity:0.85;">⚠️ Alterações feitas aqui valem só até recarregar a página e não mudam o login do app.</div>
+    </div>
     <button onclick="abrirModalNovoPerfil()"
       style="background:linear-gradient(135deg,#3b6ef0,#818cf8);color:#fff;border:none;
       border-radius:10px;padding:9px 18px;font-size:13px;font-weight:700;
@@ -1090,13 +1153,13 @@ function renderPerfis(){
               <span style="font-size:11px;color:var(--text2);">Senha</span>
               <div style="display:flex;align-items:center;gap:6px;">
                 <span style="font-size:12px;font-weight:700;" id="senhaVal_${user}">••••••</span>
-                <button onclick="toggleVerSenha('${user}','${info.senha}')"
+                <button onclick="toggleVerSenha('${user}')"
                   style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--text2);">👁️</button>
               </div>
             </div>
           </div>
           <button class="btn-edit-sm" style="width:100%;justify-content:center;"
-            onclick="abrirModalEditarPerfil('${user}','${info.senha}','${info.tipo}')">✏️ Editar perfil</button>
+            onclick="abrirModalEditarPerfil('${user}')">✏️ Editar perfil</button>
         </div>`;
       });
     }
@@ -1154,7 +1217,7 @@ function abrirGrupoPerfil(grupoId){
               <div class="perfil-dado">Login: <span>${user}</span></div>
               <div class="perfil-dado">Senha:
                 <span id="senhaVal_${user}">••••••</span>
-                <button onclick="toggleVerSenha('${user}','${info.senha}')"
+                <button onclick="toggleVerSenha('${user}')"
                   style="background:none;border:none;cursor:pointer;font-size:13px;margin-left:4px;color:var(--text2);">👁️</button>
               </div>
             </div>
@@ -1182,6 +1245,9 @@ function excluirPerfil(user){
 }
 
 function abrirModalEditarPerfil(user, senha, tipo){
+  const _inf = _perfisDB[user]||{};
+  senha = _inf.senha!=null ? _inf.senha : senha;
+  tipo  = _inf.tipo  || tipo;
   const modal = document.getElementById('modalEditarPerfil');
   if(modal) modal.remove();
 
@@ -1196,13 +1262,13 @@ function abrirModalEditarPerfil(user, senha, tipo){
 
       <div class="modal-field">
         <div class="modal-label">Login</div>
-        <input class="modal-input" type="text" id="editLogin" value="${user}" placeholder="Login" />
+        <input class="modal-input" type="text" id="editLogin" value="${escHtml(user)}" placeholder="Login" />
       </div>
 
       <div class="modal-field">
         <div class="modal-label">Senha</div>
         <div style="position:relative;">
-          <input class="modal-input" type="text" id="editSenha" value="${senha}" placeholder="Senha" style="padding-right:40px;" />
+          <input class="modal-input" type="text" id="editSenha" value="${escHtml(senha)}" placeholder="Senha" style="padding-right:40px;" />
         </div>
       </div>
 
@@ -1268,11 +1334,15 @@ function salvarEdicaoPerfil(loginAntigo){
   const err = document.getElementById('editPerfilErr');
 
   if(!novoLogin){ err.textContent='⚠️ Digite um login!'; return; }
+  if(/['"<>&\\]/.test(novoLogin)){ err.textContent='⚠️ O login não pode ter aspas, < > & ou barra.'; return; }
   if(!novaSenha){ err.textContent='⚠️ Digite uma senha!'; return; }
   if(novoLogin !== loginAntigo && _perfisDB[novoLogin]){ err.textContent='⚠️ Já existe um perfil com esse login!'; return; }
 
   const infoAntiga = _perfisDB[loginAntigo];
   const emojis = { adm:'⚙️', entregador:'🛵', supervisor:'👀' };
+
+  // Se renomeou um entregador, as entregas continuam gravadas no nome antigo: mantém o vínculo
+  if(infoAntiga.tipo==='entregador' && novoLogin!==loginAntigo) ALIASES_BASE[novoLogin]=aliasesDe(loginAntigo).slice();
 
   // Remove o antigo e cria com novo login
   delete _perfisDB[loginAntigo];
@@ -1363,6 +1433,7 @@ function criarNovoPerfil(){
   const err   = document.getElementById('novoPerfilErr');
 
   if(!login){ err.textContent='⚠️ Digite um login!'; return; }
+  if(/['"<>&\\]/.test(login)){ err.textContent='⚠️ O login não pode ter aspas, < > & ou barra.'; return; }
   if(!senha){ err.textContent='⚠️ Digite uma senha!'; return; }
   if(_perfisDB[login]){ err.textContent='⚠️ Já existe um perfil com esse login!'; return; }
 
@@ -1380,6 +1451,7 @@ function criarNovoPerfil(){
 
 let _senhaVis = {};
 function toggleVerSenha(user, senha){
+  if(_perfisDB[user]) senha = _perfisDB[user].senha;
   _senhaVis[user] = !_senhaVis[user];
   document.getElementById(`senhaVal_${user}`).textContent = _senhaVis[user] ? senha : '••••••';
 }
@@ -1403,8 +1475,8 @@ function renderEnderecosEdit(){
   const endMap = {};
   Object.values(todas).forEach(ents=>Object.values(ents).forEach(e=>{
     if(!e.rua) return;
-    const k = semAcento(e.rua.trim())+'|'+(e.numero||'');
-    if(!endMap[k]) endMap[k]={rua:e.rua.trim(),numero:e.numero||'S/N',taxa:e.taxa||0,count:0};
+    const k = semAcento(ruaCompleta(e.rua))+'|'+(e.numero||'');
+    if(!endMap[k]) endMap[k]={rua:ruaCompleta(e.rua),numero:e.numero||'S/N',taxa:e.taxa||0,count:0};
     endMap[k].count++;
     endMap[k].taxa=e.taxa||endMap[k].taxa;
   }));
@@ -1430,7 +1502,7 @@ function renderEnderecosEdit(){
         <div id="endView_${i}" style="display:flex;align-items:center;gap:10px;">
           <div class="end-rank">${i+1}</div>
           <div style="flex:1;min-width:0;">
-            <div style="font-size:13px;font-weight:700;">${e.rua}, nº ${e.numero}</div>
+            <div style="font-size:13px;font-weight:700;">${escHtml(e.rua)}, nº ${escHtml(e.numero)}</div>
             <div style="font-size:11px;color:var(--text2);margin-top:2px;">${e.count}x entregue · ${fmt(e.taxa)}</div>
           </div>
           <button onclick="abrirEditEnd(${i})"
@@ -1444,11 +1516,11 @@ function renderEnderecosEdit(){
           <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-bottom:10px;">
             <div>
               <div class="modal-label">Rua</div>
-              <input class="modal-input" id="endRua_${i}" value="${e.rua}" style="font-size:12px;padding:8px;" />
+              <input class="modal-input" id="endRua_${i}" value="${escHtml(e.rua)}" style="font-size:12px;padding:8px;" />
             </div>
             <div>
               <div class="modal-label">Número</div>
-              <input class="modal-input" id="endNum_${i}" value="${e.numero}" style="font-size:12px;padding:8px;" />
+              <input class="modal-input" id="endNum_${i}" value="${escHtml(e.numero)}" style="font-size:12px;padding:8px;" />
             </div>
             <div>
               <div class="modal-label">Taxa</div>
@@ -1457,7 +1529,7 @@ function renderEnderecosEdit(){
           </div>
           <div style="display:flex;gap:8px;justify-content:flex-end;">
             <button class="btn-cancel" style="padding:8px 14px;font-size:12px;" onclick="fecharEditEnd(${i})">Cancelar</button>
-            <button class="btn-save" style="padding:8px 14px;font-size:12px;" onclick="salvarEndEdit(${i},'${e.rua.replace(/'/g,"\\'")}','${e.numero}')">✓ Salvar</button>
+            <button class="btn-save" style="padding:8px 14px;font-size:12px;" onclick="salvarEndEdit(${i})">✓ Salvar</button>
           </div>
         </div>
       </div>`;
@@ -1482,33 +1554,52 @@ function fecharEditEnd(i){
   document.getElementById(`endView_${i}`).style.display='flex';
   document.getElementById(`endForm_${i}`).style.display='none';
 }
-async function salvarEndEdit(i, ruaAntiga, numAntigo){
-  const novaRua  = document.getElementById(`endRua_${i}`).value.trim();
+async function salvarEndEdit(i){
+  const orig = (window._endEditList||[])[i];
+  if(!orig){ toast('⚠️ Recarregue a lista e tente de novo'); return; }
+  const ruaAntiga = orig.rua, numAntigo = (orig.numero==='S/N' ? 'S/N' : String(orig.numero));
+
+  const novaRua  = removerAcentos(document.getElementById(`endRua_${i}`).value.trim());
   const novoNum  = document.getElementById(`endNum_${i}`).value.trim();
   const novaTaxa = parseFloat(document.getElementById(`endTaxa_${i}`).value);
-  if(!novaRua||isNaN(novaTaxa)){ toast('⚠️ Preencha todos os campos!'); return; }
+  if(!novaRua||isNaN(novaTaxa)||novaTaxa<0){ toast('⚠️ Preencha todos os campos!'); return; }
 
   toast('⏳ Atualizando...');
-  const snap = await db.ref('entregas').once('value');
-  const allD = snap.val()||{};
-  const updates = {};
-  Object.entries(allD).forEach(([user,dias])=>{
-    Object.entries(dias).forEach(([dia,ents])=>{
-      Object.entries(ents).forEach(([id,e])=>{
-        if(!e||!e.rua) return;
-        if(semAcento(e.rua.trim())===semAcento(ruaAntiga.trim()) && (e.numero||'').trim()===numAntigo.trim()){
-          updates[`entregas/${user}/${dia}/${id}/rua`]    = novaRua;
-          updates[`entregas/${user}/${dia}/${id}/numero`] = novoNum||e.numero;
-          updates[`entregas/${user}/${dia}/${id}/taxa`]   = novaTaxa;
-        }
+  try{
+    const snap = await db.ref('entregas').once('value');
+    const allD = snap.val()||{};
+    const updates = {};
+    let qtd = 0;
+    const antigaSem = semAcento(ruaAntiga.trim());
+    const numAnt = numAntigo.trim();
+    // entregas antigas podem estar sem o "Rua " na frente
+    const casaRua = r => { const x=semAcento((r||'').trim()); return x===antigaSem || (!temPrefixoLog(r) && ('rua '+x)===antigaSem); };
+    const casaNum = n => { const x=(n||'').trim(); return x===numAnt || (numAnt==='S/N' && x===''); };
+    Object.entries(allD).forEach(([user,dias])=>{
+      if(!dias||typeof dias!=='object') return;
+      Object.entries(dias).forEach(([dia,ents])=>{
+        if(!ents||typeof ents!=='object') return;
+        Object.entries(ents).forEach(([id,e])=>{
+          if(!e||!e.rua) return;
+          if(casaRua(e.rua) && casaNum(e.numero)){
+            updates[`entregas/${user}/${dia}/${id}/rua`]    = novaRua;
+            updates[`entregas/${user}/${dia}/${id}/numero`] = novoNum||e.numero||'S/N';
+            updates[`entregas/${user}/${dia}/${id}/taxa`]   = novaTaxa;
+            qtd++;
+          }
+        });
       });
     });
-  });
-  if(Object.keys(updates).length){
-    await db.ref().update(updates);
-    toast(`✓ ${Object.keys(updates).length/3} entregas atualizadas!`);
-  } else {
-    toast('Nenhuma entrega encontrada.');
+    if(qtd){
+      await db.ref().update(updates);
+      toast(`✓ ${qtd} entrega${qtd!==1?'s':''} atualizada${qtd!==1?'s':''}!`);
+    } else {
+      toast('Nenhuma entrega encontrada.');
+    }
+  }catch(err){
+    console.error('Firebase:', err);
+    toast('❌ Erro ao atualizar. Tente de novo.');
+    return;
   }
   await carregarDados();
   renderEnderecosEdit();
@@ -1586,7 +1677,7 @@ function renderHistorico(){
           const diaSemana=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][d.getDay()];
           const isLast=idx===mes.dias.length-1;
 
-          return `<div onclick="verDiaDetalhe('${dia}')"
+          return `<div onclick="verDiaDetalhe('${jsStr(dia)}')"
             style="display:flex;align-items:center;gap:16px;padding:14px 18px;cursor:pointer;
             transition:background 0.12s;border-bottom:${isLast?'none':'1px solid rgba(255,255,255,0.05)'};"
             onmouseover="this.style.background='rgba(255,255,255,0.04)'"
@@ -1693,7 +1784,7 @@ function verDiaDetalhe(dia){
             border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;transition:background 0.12s;border-radius:6px;"
             onmouseover="this.style.background='rgba(255,255,255,0.03)'"
             onmouseout="this.style.background='transparent'"
-            onclick="abrirDetalhe(${JSON.stringify(e).replace(/"/g,'&quot;')},'${e._user}','${dia}')">
+            onclick="abrirDetalhe(${jsonAttr(e)},'${e._user}','${jsStr(dia)}')">
 
             <!-- Número -->
             <div class="item-num" style="width:22px;height:22px;background:rgba(96,165,250,0.1);border-radius:6px;
@@ -1703,7 +1794,7 @@ function verDiaDetalhe(dia){
             <!-- Info -->
             <div style="flex:1;min-width:0;">
               <div style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text);">
-                ${e.rua||''}, nº ${e.numero||''}</div>
+                ${escHtml(e.rua||'')}, nº ${escHtml(e.numero||'')}</div>
               <div style="font-size:11px;color:var(--text2);margin-top:2px;">
                 🛵 ${e._user} &nbsp;·&nbsp; 🕐 ${fmtHora(e.ts||0)} &nbsp;·&nbsp;
                 <span style="color:var(--green);font-weight:700;">${fmt(e.taxa||0)}</span>

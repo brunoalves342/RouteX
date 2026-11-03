@@ -667,13 +667,31 @@ let idAtual      = null;
 let entAtual     = null;
 let entregasLocal = [];   // cache local (funciona offline)
 let unsubscribe  = null;  // listener Firebase
+let diaEscutando = null;  // dia (YYYY-MM-DD) que o app está usando agora
 
 const ORIGEM = 'R. Amendoinzeiro, 150, Leonor, Londrina, PR';
 
 // ══════════════════════════════════════════
 //  UTILITÁRIOS
 // ══════════════════════════════════════════
-function fmt(v){ return 'R$ ' + v.toFixed(2).replace('.', ','); }
+function fmt(v){ return 'R$ ' + (Number(v)||0).toFixed(2).replace('.', ','); }
+
+// Escapa texto vindo do banco antes de colocar em innerHTML
+function escHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+// Codifica texto pra ir dentro de aspas simples num onclick="" (sem quebrar com ' " \ etc.)
+function jsStr(s){
+  return String(s==null?'':s).replace(/[^A-Za-z0-9_\-. ]/g, c=>{
+    const n=c.charCodeAt(0);
+    return n<256 ? '\\x'+n.toString(16).padStart(2,'0') : '\\u'+n.toString(16).padStart(4,'0');
+  });
+}
+function removerAcentos(s){ return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+// "Rua", "Av.", "Avenida"... no começo (mas NÃO pega "Avelino", "Ruanda"...)
+function temPrefixoLog(s){
+  return /^(rua|av|avenida|alameda|travessa|praca|praça)(?![a-zA-Z\u00c0-\u00ff])/i.test((s||'').trim());
+}
 function fmtHora(ts){
   const d = new Date(ts);
   return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
@@ -752,7 +770,7 @@ function fazerLogin(){
   err.textContent = '';
   usuarioAtual    = user;
   // Salva sessão no localStorage pra não deslogar ao fechar o app
-  localStorage.setItem('routex_session', JSON.stringify({ user, ts: Date.now() }));
+  try{ localStorage.setItem('routex_session', JSON.stringify({ user, ts: Date.now() })); }catch(e){}
   document.getElementById('loginNome').value  = '';
   document.getElementById('loginSenha').value = '';
   entrarApp();
@@ -778,6 +796,7 @@ document.getElementById('loginSenha').addEventListener('keydown', e=>{ if(e.key=
 
 function entrarApp(){
   const tipo = USUARIOS[usuarioAtual].tipo;
+  diaEscutando = hoje();
 
   // ADM e Supervisor vão direto pro painel
   if(tipo === 'adm' || tipo === 'supervisor'){
@@ -800,8 +819,8 @@ function sair(){
   if(unsubscribe){ unsubscribe(); unsubscribe=null; }
   if(window._admInterval){ clearInterval(window._admInterval); }
   // Remove sessão salva ao sair manualmente
-  localStorage.removeItem('routex_session');
-  usuarioAtual=null; idAtual=null; entAtual=null; entregasLocal=[];
+  try{ localStorage.removeItem('routex_session'); }catch(e){}
+  usuarioAtual=null; idAtual=null; entAtual=null; entregasLocal=[]; diaEscutando=null;
   mostrarPagina('pageLogin');
 }
 
@@ -830,15 +849,19 @@ function mostrarPagina(id){
 // ══════════════════════════════════════════
 function escutarEntregas(){
   if(unsubscribe){ unsubscribe(); }
+  diaEscutando = hoje();
   const ref = db.ref(pathUser(usuarioAtual));
 
-  // Firebase persiste offline automaticamente (enablePersistence)
   ref.on('value', snap=>{
     const data = snap.val() || {};
-    entregasLocal = Object.values(data).sort((a,b)=>a.ts-b.ts);
+    entregasLocal = Object.values(data).filter(e=>e && e.ts).sort((a,b)=>a.ts-b.ts);
     atualizarStats();
     // Se histórico aberto, atualiza
     if(document.getElementById('modalHistorico').classList.contains('show')) renderHistorico();
+  }, err=>{
+    console.error('Firebase (escutar):', err);
+    setSyncStatus('offline','⚠️ Sem acesso ao banco');
+    toast('⚠️ Sem permissão no banco de dados');
   });
 
   unsubscribe = () => ref.off('value');
@@ -847,8 +870,26 @@ function escutarEntregas(){
 // ══════════════════════════════════════════
 //  STATS
 // ══════════════════════════════════════════
+// Se o app ficou aberto de um dia pro outro, passa a usar o dia novo
+function verificarVirouDia(){
+  if(!usuarioAtual || !diaEscutando) return;
+  const h = hoje();
+  if(diaEscutando === h) return;
+  const tipo = USUARIOS[usuarioAtual].tipo;
+  if(tipo === 'adm' || tipo === 'supervisor'){
+    diaEscutando = h;
+    document.getElementById('admDataHeader').textContent = fmtData(h);
+    if(abaAdmAtiva === 'dia') renderDiaCard();
+  } else {
+    document.getElementById('appDataHeader').textContent = fmtData(h);
+    escutarEntregas();   // troca o listener pro dia novo
+  }
+}
+setInterval(verificarVirouDia, 30000);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) verificarVirouDia(); });
+
 function atualizarStats(){
-  const soma = entregasLocal.reduce((s,e)=>s+e.taxa,0);
+  const soma = entregasLocal.reduce((s,e)=>s+(Number(e.taxa)||0),0);
   document.getElementById('totalEntregas').textContent = entregasLocal.length;
   document.getElementById('totalTaxas').textContent    = fmt(soma);
 }
@@ -862,7 +903,7 @@ let enderecoHistorico = {};
 function normalizarRua(rua){
   if(!rua) return '';
   return rua.trim()
-    .replace(/^(rua|r\.|av\.|av |avenida|alameda|al\.|travessa|tv\.|praça|pça\.)\s+/i, '')
+    .replace(/^(rua|r\.|av\.|av |avenida|alameda|al\.|travessa|tv\.|pra[cç]a|p[cç]a\.)\s+/i, '')
     .trim();
 }
 
@@ -886,7 +927,7 @@ function carregarHistoricoEnderecos(){
           if(!e || !e.rua) return;
           const chave = chaveEndereco(e.rua, e.numero);
           // Guarda sempre o nome mais completo (com "Rua" na frente)
-          const ruaFull = e.rua.trim().match(/^(rua|av|avenida|alameda|travessa|praça)/i)
+          const ruaFull = temPrefixoLog(e.rua)
             ? e.rua.trim()
             : 'Rua ' + normalizarRua(e.rua);
           if(!enderecoHistorico[chave]){
@@ -908,6 +949,9 @@ function carregarHistoricoEnderecos(){
       });
     });
     console.log('Histórico carregado:', Object.keys(enderecoHistorico).length, 'endereços');
+  }, err=>{
+    console.error('Firebase (histórico):', err);
+    toast('⚠️ Não consegui carregar as sugestões de endereço');
   });
 }
 
@@ -927,6 +971,12 @@ function expandirParaBusca(texto){
 
 // Remove acentos de string
 function semAcento(s){ return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase(); }
+
+let _sugestoesAtuais = [];
+function selecionarSugestao(idx){
+  const e = _sugestoesAtuais[idx];
+  if(e) selecionarEndereco(e.rua, e.numero, e.taxa);
+}
 
 function mostrarSugestoes(texto){
   const el = document.getElementById('autocompleteList');
@@ -957,13 +1007,13 @@ function mostrarSugestoes(texto){
   el.style.top = (rect.bottom + 6) + 'px';
 
   const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-  el.innerHTML = resultados.map(e=>{
-    const hl = e.rua.replace(new RegExp(`(${esc(texto)})`, 'gi'),
-      '<span class="ac-hl">$1</span>');
-    const ruaSafe = e.rua.replace(/'/g,"\\'").replace(/"/g,'&quot;');
-    return `<div class="autocomplete-item"
-      onclick="selecionarEndereco('${ruaSafe}','${e.numero}',${e.taxa})">
-      <div class="ac-rua">${hl}, nº ${e.numero}</div>
+  _sugestoesAtuais = resultados;
+  const reHl = new RegExp(`(${esc(texto)})`, 'gi');
+  el.innerHTML = resultados.map((e,idx)=>{
+    // destaca o trecho digitado (escapando o resto)
+    const hl = e.rua.split(reHl).map((p,k)=> k%2 ? `<span class="ac-hl">${escHtml(p)}</span>` : escHtml(p)).join('');
+    return `<div class="autocomplete-item" onclick="selecionarSugestao(${idx})">
+      <div class="ac-rua">${hl}, nº ${escHtml(e.numero)}</div>
       <div class="ac-info">Taxa: <span class="ac-taxa">${fmt(e.taxa)}</span> · ${e.count}x entregue</div>
     </div>`;
   }).join('');
@@ -1015,6 +1065,7 @@ document.getElementById('inputRua').addEventListener('focus', function(){
 });
 
 function adicionarEntrega(){
+  verificarVirouDia();   // garante que está no dia certo antes de salvar
   const rua    = document.getElementById('inputRua').value.trim();
   const numero = document.getElementById('inputNumero').value.trim();
   const taxaRaw= document.getElementById('inputTaxa').value.trim();
@@ -1023,9 +1074,8 @@ function adicionarEntrega(){
   if(!taxaRaw||isNaN(taxa)||taxa<0){ toast('⚠️ Taxa inválida!'); document.getElementById('inputTaxa').focus(); return; }
 
   // Remove acentos e normaliza a rua antes de salvar
-  const removerAcentos = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   const ruaSemAc = removerAcentos(rua.trim());
-  const ruaNorm = ruaSemAc.match(/^(rua|av|avenida|alameda|travessa|praca)/i)
+  const ruaNorm = temPrefixoLog(ruaSemAc)
     ? ruaSemAc
     : 'Rua ' + normalizarRua(ruaSemAc);
 
@@ -1033,7 +1083,10 @@ function adicionarEntrega(){
   const ent = { id, rua: ruaNorm, numero: numero||'S/N', taxa, ts: id, user: usuarioAtual };
 
   // Salva no Firebase
-  db.ref(`${pathUser(usuarioAtual)}/${id}`).set(ent);
+  db.ref(`${pathUser(usuarioAtual)}/${id}`).set(ent).catch(err=>{
+    console.error('Firebase (salvar entrega):', err);
+    toast('❌ ERRO ao salvar a entrega! Confira a conexão e anote essa entrega.');
+  });
 
   // Atualiza cache local
   const chave = chaveEndereco(ruaNorm, numero||'S/N');
@@ -1048,7 +1101,7 @@ function adicionarEntrega(){
   document.getElementById('inputNumero').value = '';
   document.getElementById('inputTaxa').value   = '';
   document.getElementById('taxaPreview').textContent = '';
-  document.getElementById('autocompleteList').classList.remove('show');
+  document.getElementById('autocompleteList').style.display = 'none';
   document.getElementById('inputRua').focus();
   toast('✓ Entrega registrada!');
 }
@@ -1109,11 +1162,11 @@ function renderHistorico(){
   }
   el.innerHTML = [...lista].reverse().map((e,i)=>{
     const num = total-i;
-    return `<div class="hist-card" onclick="abrirDetalhe('${e.id}','${usuarioAtual}','${hoje()}')">
+    return `<div class="hist-card" onclick="abrirDetalhe('${jsStr(e.id)}','${usuarioAtual}','${hoje()}')">
       <div class="hc-num">${num}</div>
       <div class="hc-info">
-        <div class="hc-addr">${e.rua}</div>
-        <div class="hc-time">nº ${e.numero} · 🕐 ${fmtHora(e.ts)}</div>
+        <div class="hc-addr">${escHtml(e.rua)}</div>
+        <div class="hc-time">nº ${escHtml(e.numero)} · 🕐 ${fmtHora(e.ts)}</div>
       </div>
       <div class="hc-right">
         <div class="hc-taxa">${fmt(e.taxa)}</div>
@@ -1140,9 +1193,9 @@ function renderDiasAnteriores(){
 
     el.innerHTML = diasAnt.map(dia=>{
       const lista = Object.values(allDias[dia]).sort((a,b)=>a.ts-b.ts);
-      const soma  = lista.reduce((s,e)=>s+e.taxa,0);
+      const soma  = lista.reduce((s,e)=>s+(Number(e.taxa)||0),0);
       const total = lista.length;
-      return `<div class="adm-day-card" onclick="verDiaEntregador('${dia}')">
+      return `<div class="adm-day-card" onclick="verDiaEntregador('${jsStr(dia)}')">
         <div class="adm-day-header">
           <div class="adm-day-date">${fmtData(dia)}</div>
           <div class="adm-day-total">${fmt(soma)}</div>
@@ -1160,7 +1213,7 @@ function verDiaEntregador(dia){
     const data  = snap.val()||{};
     const lista = Object.values(data).sort((a,b)=>a.ts-b.ts);
     const total = lista.length;
-    const soma  = lista.reduce((s,e)=>s+e.taxa,0);
+    const soma  = lista.reduce((s,e)=>s+(Number(e.taxa)||0),0);
 
     const el = document.getElementById('histScroll');
     document.getElementById('histCount').textContent = `${fmtData(dia)}`;
@@ -1180,11 +1233,11 @@ function verDiaEntregador(dia){
       </div>
     ` + lista.reverse().map((e,i)=>{
       const num = total-i;
-      return `<div class="hist-card" onclick="abrirDetalhe('${e.id}','${usuarioAtual}','${dia}')">
+      return `<div class="hist-card" onclick="abrirDetalhe('${jsStr(e.id)}','${usuarioAtual}','${jsStr(dia)}')">
         <div class="hc-num">${num}</div>
         <div class="hc-info">
-          <div class="hc-addr">${e.rua}</div>
-          <div class="hc-time">nº ${e.numero} · 🕐 ${fmtHora(e.ts)}</div>
+          <div class="hc-addr">${escHtml(e.rua)}</div>
+          <div class="hc-time">nº ${escHtml(e.numero)} · 🕐 ${fmtHora(e.ts)}</div>
         </div>
         <div class="hc-right">
           <div class="hc-taxa">${fmt(e.taxa)}</div>
@@ -1223,7 +1276,7 @@ function abrirDetalhe(id, user, data){
     const addrEl = document.getElementById('detAddr');
     addrEl.style.cursor = podeEditEnd ? 'pointer' : 'default';
     if(podeEditEnd){
-      addrEl.innerHTML = e.rua + ' <span style="font-size:11px;color:rgba(96,165,250,0.5);">✏️</span>';
+      addrEl.innerHTML = escHtml(e.rua) + ' <span style="font-size:11px;color:rgba(96,165,250,0.5);">✏️</span>';
     } else {
       addrEl.textContent = e.rua;
     }
@@ -1282,17 +1335,18 @@ function editarEndereco(){
 }
 
 function salvarEndereco(){
-  const novaRua    = document.getElementById('inputEditRua').value.trim();
+  const novaRua    = removerAcentos(document.getElementById('inputEditRua').value.trim());
   const novoNumero = document.getElementById('inputEditNumero').value.trim();
   if(!novaRua){ toast('⚠️ Digite o nome da rua!'); return; }
 
   const user = entAtual._user;
   const data = entAtual._data;
-  db.ref(`entregas/${user}/${data}/${idAtual}/rua`).set(novaRua);
-  if(novoNumero) db.ref(`entregas/${user}/${data}/${idAtual}/numero`).set(novoNumero);
+  const falhou = err=>{ console.error('Firebase (editar endereço):', err); toast('❌ Erro ao salvar o endereço'); };
+  db.ref(`entregas/${user}/${data}/${idAtual}/rua`).set(novaRua).catch(falhou);
+  if(novoNumero) db.ref(`entregas/${user}/${data}/${idAtual}/numero`).set(novoNumero).catch(falhou);
 
   // Atualiza visual
-  document.getElementById('detAddr').textContent = novaRua;
+  document.getElementById('detAddr').innerHTML = escHtml(novaRua) + ' <span style="font-size:11px;color:rgba(96,165,250,0.5);">✏️</span>';
   document.getElementById('detSub').textContent  = 'Número ' + (novoNumero || entAtual.numero) + ' · ' + fmtHora(entAtual.ts);
   entAtual.rua    = novaRua;
   entAtual.numero = novoNumero || entAtual.numero;
@@ -1319,7 +1373,7 @@ function salvarTaxa(ev){
   ev.stopPropagation();
   const nova=parseFloat(document.getElementById('inputEditTaxa').value.trim());
   if(isNaN(nova)||nova<0){ toast('⚠️ Taxa inválida!'); return; }
-  db.ref(`entregas/${entAtual._user}/${entAtual._data}/${idAtual}/taxa`).set(nova);
+  db.ref(`entregas/${entAtual._user}/${entAtual._data}/${idAtual}/taxa`).set(nova).catch(err=>{ console.error(err); toast('❌ Erro ao salvar a taxa'); });
   document.getElementById('detTaxa').textContent=fmt(nova);
   fecharEditTaxa();
   toast('✓ Taxa atualizada!');
@@ -1333,7 +1387,7 @@ function fecharEditTaxa(){
 // ── Excluir ──
 function excluirAtual(){
   if(!idAtual||!entAtual) return;
-  db.ref(`entregas/${entAtual._user}/${entAtual._data}/${idAtual}`).remove();
+  db.ref(`entregas/${entAtual._user}/${entAtual._data}/${idAtual}`).remove().catch(err=>{ console.error(err); toast('❌ Erro ao remover a entrega'); });
   document.getElementById('modalDetalhe').classList.remove('show');
   idAtual=null; entAtual=null;
   toast('Entrega removida');
@@ -1452,7 +1506,7 @@ function renderPerfiis(){
       <div id="form_${user}" style="display:none;margin-top:10px;border-top:1px solid rgba(255,255,255,0.07);padding-top:10px;">
         <div class="perfil-row" style="margin-bottom:8px;">
           <span class="perfil-label">Nova senha</span>
-          <input class="perfil-edit-input" type="text" id="input_senha_${user}" value="${info.senha}" />
+          <input class="perfil-edit-input" type="text" id="input_senha_${user}" value="${escHtml(info.senha)}" />
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
           <button onclick="cancelarEditPerfil('${user}')"
@@ -1502,7 +1556,7 @@ function renderDiaCard(){
 function renderDiaBody(dadosEnt,entregadores){
   let totalGeral=0, html='';
   entregadores.forEach(user=>{
-    const lista=dadosEnt[user]||[]; const soma=lista.reduce((s,e)=>s+e.taxa,0); totalGeral+=soma;
+    const lista=dadosEnt[user]||[]; const soma=lista.reduce((s,e)=>s+(Number(e.taxa)||0),0); totalGeral+=soma;
     html+=`<div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:12px;margin-bottom:8px;cursor:pointer;"
       onclick="verEntregadorHoje('${user}')">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
@@ -1539,7 +1593,7 @@ function renderHistoricoCard(){
       entregadores.forEach(user=>{
         const aliases=USUARIOS[user].alias||[user]; let lista=[];
         aliases.forEach(alias=>{ if(allData[alias]&&allData[alias][dia]) lista=lista.concat(Object.values(allData[alias][dia])); });
-        const soma=lista.reduce((s,e)=>s+e.taxa,0);
+        const soma=lista.reduce((s,e)=>s+(Number(e.taxa)||0),0);
         if(lista.length>0){ totalDia+=soma; totalEnt+=lista.length;
           resumo+=`<div style="display:flex;justify-content:space-between;padding:4px 0;border-top:1px solid rgba(255,255,255,0.05);">
             <span style="font-size:12px;font-weight:600;color:var(--text2);">${user} · ${lista.length} entregas</span>
@@ -1547,7 +1601,7 @@ function renderHistoricoCard(){
         }
       });
       if(totalEnt>0) html+=`<div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:12px;margin-bottom:8px;cursor:pointer;"
-          onclick="verRelDia('${dia}')">
+          onclick="verRelDia('${jsStr(dia)}')">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <span style="font-size:13px;font-weight:800;color:var(--text);">${fmtData(dia)}</span>
             <span style="font-size:14px;font-weight:900;color:var(--green);">${fmt(totalDia)}</span>
@@ -1572,8 +1626,8 @@ function carregarEnderecosCard(){
         if(!dia||typeof dia!=='object') return;
         Object.values(dia).forEach(e=>{
           if(!e||!e.rua) return;
-          const chave=semAcento(e.rua.trim())+'|'+(e.numero||'').trim();
-          const ruaFull=e.rua.trim().match(/^(rua|av|avenida|alameda|travessa|praça)/i)?e.rua.trim():'Rua '+normalizarRua(e.rua);
+          const ruaFull=temPrefixoLog(e.rua)?e.rua.trim():'Rua '+normalizarRua(e.rua);
+          const chave=semAcento(ruaFull)+'|'+(e.numero||'').trim();
           if(!mapa[chave]){ mapa[chave]={rua:ruaFull,numero:(e.numero||'S/N').trim(),taxa:e.taxa||0,count:1}; }
           else{ mapa[chave].count++; if(e.taxa) mapa[chave].taxa=e.taxa; }
         });
@@ -1590,6 +1644,7 @@ function filtrarEnderecosCard(texto){ renderEndListCard(_todosEnderecos,texto); 
 function renderEndListCard(todos, filtro){
   const q = semAcento((filtro||'').trim());
   const filtrados = q ? todos.filter(e=>semAcento(e.rua).includes(q)||(e.numero+'').includes(q)) : todos;
+  window._endCardLista = filtrados;   // salvar usa o índice (sem passar texto no onclick)
   const el = document.getElementById('endListCard');
   const sub = document.getElementById('endSubtitle');
   if(sub) sub.textContent = filtrados.length + ' endereço' + (filtrados.length!==1?'s':'') + ' cadastrados';
@@ -1601,7 +1656,7 @@ function renderEndListCard(todos, filtro){
       <div id="end_view_${i}" style="display:flex;align-items:center;gap:10px;">
         <div style="font-size:16px;flex-shrink:0;">📍</div>
         <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;font-weight:700;color:#f0f4ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${e.rua}, nº ${e.numero}</div>
+          <div style="font-size:13px;font-weight:700;color:#f0f4ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(e.rua)}, nº ${escHtml(e.numero)}</div>
           <div style="font-size:11px;color:#94a3b8;margin-top:1px;">${e.count}x · última taxa: ${fmt(e.taxa)}</div>
         </div>
         <button onclick="editarEnderecoCard(${i})"
@@ -1614,14 +1669,14 @@ function renderEndListCard(todos, filtro){
         <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
           <div style="display:flex;gap:6px;align-items:center;">
             <span style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;width:46px;flex-shrink:0;">Rua</span>
-            <input type="text" id="end_rua_${i}" value="${e.rua}"
+            <input type="text" id="end_rua_${i}" value="${escHtml(e.rua)}"
               style="flex:1;background:rgba(0,0,0,0.3);border:1.5px solid rgba(96,165,250,0.4);border-radius:8px;
               padding:7px 10px;color:#f0f4ff;font-size:13px;font-weight:600;font-family:'Inter',sans-serif;
               outline:none;-webkit-appearance:none;" />
           </div>
           <div style="display:flex;gap:6px;align-items:center;">
             <span style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;width:46px;flex-shrink:0;">Número</span>
-            <input type="text" id="end_num_${i}" value="${e.numero}"
+            <input type="text" id="end_num_${i}" value="${escHtml(e.numero)}"
               style="width:80px;background:rgba(0,0,0,0.3);border:1.5px solid rgba(96,165,250,0.4);border-radius:8px;
               padding:7px 10px;color:#f0f4ff;font-size:13px;font-weight:600;font-family:'Inter',sans-serif;
               outline:none;-webkit-appearance:none;" />
@@ -1640,7 +1695,7 @@ function renderEndListCard(todos, filtro){
             border-radius:8px;padding:7px 12px;font-size:12px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;">
             Cancelar
           </button>
-          <button onclick="salvarEnderecoCard(${i},'${e.rua.replace(/'/g,"\\'")}','${e.numero}')"
+          <button onclick="salvarEnderecoCard(${i})"
             style="background:linear-gradient(135deg,#3b6ef0,#818cf8);color:#fff;border:none;
             border-radius:8px;padding:7px 14px;font-size:12px;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;">
             ✓ Salvar
@@ -1661,8 +1716,12 @@ function cancelarEditEnd(i){
   document.getElementById(`end_edit_${i}`).style.display = 'none';
 }
 
-async function salvarEnderecoCard(i, ruaAntiga, numeroAntigo){
-  const novaRua   = document.getElementById(`end_rua_${i}`).value.trim();
+async function salvarEnderecoCard(i){
+  const orig = (window._endCardLista||[])[i];
+  if(!orig){ toast('⚠️ Recarregue a lista e tente de novo'); return; }
+  const ruaAntiga = orig.rua, numeroAntigo = orig.numero;
+
+  const novaRua   = removerAcentos(document.getElementById(`end_rua_${i}`).value.trim());
   const novoNum   = document.getElementById(`end_num_${i}`).value.trim();
   const novaTaxa  = parseFloat(document.getElementById(`end_taxa_${i}`).value);
 
@@ -1671,36 +1730,51 @@ async function salvarEnderecoCard(i, ruaAntiga, numeroAntigo){
 
   toast('⏳ Atualizando...');
 
-  // Busca todas as entregas com esse endereço e atualiza no Firebase
-  const snap = await db.ref('entregas').once('value');
-  const allData = snap.val()||{};
-  const updates = {};
+  try{
+    // Busca todas as entregas com esse endereço e atualiza no Firebase
+    const snap = await db.ref('entregas').once('value');
+    const allData = snap.val()||{};
+    const updates = {};
+    let qtd = 0;
 
-  Object.entries(allData).forEach(([user, dias])=>{
-    Object.entries(dias).forEach(([dia, entregas])=>{
-      Object.entries(entregas).forEach(([id, e])=>{
-        if(!e||!e.rua) return;
-        const mesmaRua = semAcento(e.rua.trim()) === semAcento(ruaAntiga.trim());
-        const mesmoNum = (e.numero||'').trim() === numeroAntigo.trim();
-        if(mesmaRua && mesmoNum){
-          updates[`entregas/${user}/${dia}/${id}/rua`]    = novaRua;
-          updates[`entregas/${user}/${dia}/${id}/numero`] = novoNum||e.numero;
-          updates[`entregas/${user}/${dia}/${id}/taxa`]   = novaTaxa;
-        }
+    const antigaSem = semAcento(ruaAntiga.trim());
+    const numAnt    = (numeroAntigo||'').trim();
+    // entregas antigas podem estar sem o "Rua " na frente
+    const casaRua = r => { const x=semAcento((r||'').trim()); return x===antigaSem || (!temPrefixoLog(r) && ('rua '+x)===antigaSem); };
+    const casaNum = n => { const x=(n||'').trim(); return x===numAnt || (numAnt==='S/N' && x===''); };
+
+    Object.entries(allData).forEach(([user, dias])=>{
+      if(!dias||typeof dias!=='object') return;
+      Object.entries(dias).forEach(([dia, entregas])=>{
+        if(!entregas||typeof entregas!=='object') return;
+        Object.entries(entregas).forEach(([id, e])=>{
+          if(!e||!e.rua) return;
+          if(casaRua(e.rua) && casaNum(e.numero)){
+            updates[`entregas/${user}/${dia}/${id}/rua`]    = novaRua;
+            updates[`entregas/${user}/${dia}/${id}/numero`] = novoNum||e.numero||'S/N';
+            updates[`entregas/${user}/${dia}/${id}/taxa`]   = novaTaxa;
+            qtd++;
+          }
+        });
       });
     });
-  });
 
-  if(Object.keys(updates).length > 0){
-    await db.ref().update(updates);
-    toast(`✓ ${Object.keys(updates).length} entrega(s) atualizada(s)!`);
-  } else {
-    toast('Nenhuma entrega encontrada com esse endereço');
+    if(qtd > 0){
+      await db.ref().update(updates);
+      toast(`✓ ${qtd} entrega${qtd!==1?'s':''} atualizada${qtd!==1?'s':''}!`);
+    } else {
+      toast('Nenhuma entrega encontrada com esse endereço');
+    }
+  }catch(err){
+    console.error('Firebase (editar endereço):', err);
+    toast('❌ Erro ao atualizar. Tente de novo.');
+    return;
   }
 
-  // Recarrega a lista
+  // Recarrega a lista e as sugestões do autocomplete
   _enderecoCardCarregado = false;
   carregarEnderecosCard();
+  carregarHistoricoEnderecos();
 }
 
 // ── Ver entregador hoje ──
@@ -1718,12 +1792,12 @@ function verEntregadorHoje(user){
         <span class="rel-ent-name">${user}</span>
         <span class="rel-ent-badge">${total} entregas</span></div>`;
       lista.forEach((e,i)=>{
-        html+=`<div class="rel-item" onclick="abrirDetalhe('${e.id}','${user}','${hoje()}');fecharRelDia();" style="cursor:pointer;">
-          <div><div style="font-size:12px;font-weight:600;color:var(--text);">${i+1}. ${e.rua}, nº ${e.numero}</div>
+        html+=`<div class="rel-item" onclick="abrirDetalhe('${jsStr(e.id)}','${user}','${hoje()}');fecharRelDia();" style="cursor:pointer;">
+          <div><div style="font-size:12px;font-weight:600;color:var(--text);">${i+1}. ${escHtml(e.rua)}, nº ${escHtml(e.numero)}</div>
           <div style="font-size:11px;color:var(--text2);margin-top:2px;">🕐 ${fmtHora(e.ts)}</div></div>
           <div class="rel-item-taxa">${fmt(e.taxa)}</div></div>`;
       });
-      const soma=lista.reduce((s,e)=>s+e.taxa,0);
+      const soma=lista.reduce((s,e)=>s+(Number(e.taxa)||0),0);
       html+=`<div class="rel-total-row"><span class="rel-total-label">Total</span><span class="rel-total-val">${fmt(soma)}</span></div></div>`;
     }
     document.getElementById('relDiaConteudo').innerHTML=html;
@@ -1749,7 +1823,7 @@ function verRelDia(dia){
       });
       lista.sort((a,b)=>a.ts-b.ts);
       if(lista.length===0) return;
-      const soma=lista.reduce((s,e)=>s+e.taxa,0);
+      const soma=lista.reduce((s,e)=>s+(Number(e.taxa)||0),0);
       totalGeral+=soma;
       html+=`<div class="rel-ent-block"><div class="rel-ent-header">
         <span class="rel-ent-name">${user}</span>
@@ -1760,8 +1834,8 @@ function verRelDia(dia){
         aliases.forEach(alias=>{
           if(allData[alias]&&allData[alias][dia]&&allData[alias][dia][e.id]) aliasCorreto = alias;
         });
-        html+=`<div class="rel-item" onclick="abrirDetalhe('${e.id}','${aliasCorreto}','${dia}');fecharRelDia();" style="cursor:pointer;">
-          <div><div style="font-size:12px;font-weight:600;color:var(--text);">${i+1}. ${e.rua}, nº ${e.numero}</div>
+        html+=`<div class="rel-item" onclick="abrirDetalhe('${jsStr(e.id)}','${aliasCorreto}','${jsStr(dia)}');fecharRelDia();" style="cursor:pointer;">
+          <div><div style="font-size:12px;font-weight:600;color:var(--text);">${i+1}. ${escHtml(e.rua)}, nº ${escHtml(e.numero)}</div>
           <div style="font-size:11px;color:var(--text2);margin-top:2px;">🕐 ${fmtHora(e.ts)}</div></div>
           <div class="rel-item-taxa">${fmt(e.taxa)}</div></div>`;
       });
@@ -1803,7 +1877,7 @@ function abrirEnderecos(){
         Object.values(dia).forEach(e=>{
           if(!e||!e.rua) return;
           const chave = semAcento(e.rua.trim()) + '|' + (e.numero||'').trim();
-          const ruaFull = e.rua.trim().match(/^(rua|av|avenida|alameda|travessa|praça)/i)
+          const ruaFull = temPrefixoLog(e.rua)
             ? e.rua.trim()
             : 'Rua ' + normalizarRua(e.rua);
           if(!mapa[chave]){
@@ -1862,7 +1936,7 @@ function renderEnderecosComDados(todos, filtro){
         display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;">📍</div>
       <div style="flex:1;min-width:0;">
         <div style="font-size:13px;font-weight:700;color:#f0f4ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-          ${e.rua}, nº ${e.numero}
+          ${escHtml(e.rua)}, nº ${escHtml(e.numero)}
         </div>
         <div style="font-size:11px;font-weight:500;color:#94a3b8;margin-top:2px;">
           ${e.count}x entregue · última taxa: ${fmt(e.taxa)}

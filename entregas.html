@@ -11,6 +11,9 @@
 <title>RouteX</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%231a2dff'/%3E%3Cstop offset='100%25' style='stop-color:%237c3aed'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='512' height='512' rx='100' fill='url(%23bg)'/%3E%3Ctext x='60' y='370' font-family='Arial Black,Arial' font-size='290' font-weight='900' fill='white'%3ERX%3C/text%3E%3Ccircle cx='400' cy='140' r='40' fill='%2334d399'/%3E%3Ccircle cx='400' cy='140' r='20' fill='white'/%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%231a2dff'/%3E%3Cstop offset='100%25' style='stop-color:%237c3aed'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='512' height='512' rx='100' fill='url(%23bg)'/%3E%3Ctext x='60' y='370' font-family='Arial Black,Arial' font-size='290' font-weight='900' fill='white'%3ERX%3C/text%3E%3Ccircle cx='400' cy='140' r='40' fill='%2334d399'/%3E%3Ccircle cx='400' cy='140' r='20' fill='white'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://www.gstatic.com">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
@@ -357,6 +360,7 @@
     padding-top:10px;margin-top:4px;border-top:1px solid rgba(255,255,255,0.08);}
   .rel-total-label{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;}
   .rel-total-val{font-size:18px;font-weight:900;color:var(--accent);}
+  body.restaurando .page{visibility:hidden;}
 </style>
 </head>
 <body>
@@ -668,6 +672,8 @@
 </div>
 
 <script>
+// se já existe login salvo, esconde a tela de login até decidir (evita a tela de login piscar)
+try{ if(localStorage.getItem('routex_session')){ document.documentElement.classList.add('restaurando'); document.body.classList.add('restaurando'); setTimeout(()=>{ document.body.classList.remove('restaurando'); },5000); } }catch(e){}
 // ══════════════════════════════════════════
 //  FIREBASE CONFIG
 // ══════════════════════════════════════════
@@ -753,8 +759,22 @@ function aplicarPerfis(obj){
 }
 aplicarPerfis(PERFIS_PADRAO);
 
+// Perfis da última vez ficam guardados no celular → o app reconhece o login na hora, sem esperar a internet.
+const PERFIS_CACHE_KEY = 'routex_perfis_v1';
 let _perfisProntos; const _perfisPromise = new Promise(r=>{ _perfisProntos=r; });
+let _perfisFrescos; const _perfisFrescosPromise = new Promise(r=>{ _perfisFrescos=r; });
 setTimeout(()=>_perfisProntos(), 4000);   // se o banco demorar, usa os padrões
+setTimeout(()=>_perfisFrescos(), 5000);
+try{
+  const _c = JSON.parse(localStorage.getItem(PERFIS_CACHE_KEY)||'null');
+  if(_c && typeof _c==='object'){ aplicarPerfis(_c); _perfisProntos(); }
+}catch(e){}
+function guardarPerfisNoCelular(v){
+  try{
+    const o = {}; Object.entries(v||{}).forEach(([k,p])=>{ if(!p) return; const c={...p}; if(c.hash) delete c.senha; o[k]=c; });
+    localStorage.setItem(PERFIS_CACHE_KEY, JSON.stringify(o));
+  }catch(e){}
+}
 let tipoSessao = null;
 
 _authPronta.then(()=>{
@@ -762,13 +782,14 @@ db.ref('perfis').on('value', snap=>{
   const v = snap.val();
   if(!v){
     db.ref('perfis').set(PERFIS_PADRAO).catch(e=>console.error('Firebase (perfis):', e));  // 1ª vez
-    _perfisProntos();
+    _perfisProntos(); _perfisFrescos();
     return;
   }
   aplicarPerfis(v);
-  _perfisProntos();
+  guardarPerfisNoCelular(v);
+  _perfisProntos(); _perfisFrescos();
   onPerfisMudaram();
-}, err=>{ console.error('Firebase (perfis):', err); _perfisProntos(); });
+}, err=>{ console.error('Firebase (perfis):', err); _perfisProntos(); _perfisFrescos(); });
 });
 
 // Perfis antigos têm a senha em texto puro: o ADM, ao entrar, gera o hash de cada um (a senha antiga fica
@@ -936,7 +957,12 @@ async function fazerLogin(){
   const nome  = document.getElementById('loginNome').value.trim();
   const senha = document.getElementById('loginSenha').value;
   const err   = document.getElementById('loginErr');
-  const user  = Object.keys(USUARIOS).find(k => k.toLowerCase() === nome.toLowerCase());
+  const achar = () => Object.keys(USUARIOS).find(k => k.toLowerCase() === nome.toLowerCase());
+  let user = achar();
+  if (!user || !senhaConfere(USUARIOS[user], senha)){
+    await _perfisFrescosPromise;     // pode ter trocado a senha há pouco: confere com os perfis atualizados
+    user = achar();
+  }
   if (!user || !senhaConfere(USUARIOS[user], senha)){
     err.textContent = 'Nome ou senha incorretos.';
     return;
@@ -952,6 +978,9 @@ async function fazerLogin(){
 
 // Tenta restaurar sessão salva ao abrir o app
 function restaurarSessao(){
+  try{ return _restaurarSessao(); } finally { document.body.classList.remove('restaurando'); document.documentElement.classList.remove('restaurando'); }
+}
+function _restaurarSessao(){
   try {
     const raw = localStorage.getItem('routex_session');
     if(!raw) return false;
@@ -973,13 +1002,13 @@ function entrarApp(){
   tipoSessao = tipo;
   diaEscutando = hoje();
 
-  if(tipo === 'adm'){ migrarSenhasLegadas(); backupSeNecessario(); }
+  if(tipo === 'adm'){ _authPronta.then(migrarSenhasLegadas); backupSeNecessario(); }
 
   // ADM e Supervisor vão direto pro painel
   if(tipo === 'adm' || tipo === 'supervisor'){
     mostrarPagina('pageAdm');
     document.getElementById('admDataHeader').textContent = fmtData(hoje());
-    renderAdm();
+    _authPronta.then(renderAdm);
     return;
   }
 
@@ -989,7 +1018,7 @@ function entrarApp(){
   document.getElementById('btnAdmPanel').style.display = tipo === 'adm' ? '' : 'none';
   setSyncStatus('syncing', 'Conectando...');
   escutarEntregas();
-  carregarHistoricoEnderecos();
+  _authPronta.then(carregarHistoricoEnderecos);
   _authPronta.then(enviarFila);
 }
 
@@ -1028,24 +1057,41 @@ function mostrarPagina(id){
 function escutarEntregas(){
   if(unsubscribe){ unsubscribe(); }
   diaEscutando = hoje();
-  const ref = db.ref(pathUser(usuarioAtual));
+  const caminho = pathUser(usuarioAtual);
+  const ref = db.ref(caminho);
+  const chaveCache = 'routex_ent_'+caminho;
+  let ativo = true;
+  unsubscribe = () => { ativo = false; ref.off('value'); };
 
-  ref.on('value', snap=>{
-    const data = snap.val() || {};
-    // entregas ainda na fila offline (não confirmadas pelo servidor) também aparecem
-    const prefixo = pathUser(usuarioAtual)+'/';
+  // entregas ainda na fila offline (não confirmadas pelo servidor) também aparecem
+  const aplicar = data => {
+    const prefixo = caminho+'/';
     const pend = filaLer().filter(i=>i.path.startsWith(prefixo) && i.ent && !data[String(i.ent.id)]).map(i=>i.ent);
     entregasLocal = [...Object.values(data), ...pend].filter(e=>e && e.ts).sort((a,b)=>a.ts-b.ts);
     atualizarStats();
-    // Se histórico aberto, atualiza
-    if(document.getElementById('modalHistorico').classList.contains('show')) renderHistorico();
-  }, err=>{
-    console.error('Firebase (escutar):', err);
-    setSyncStatus('offline','⚠️ Sem acesso ao banco');
-    toast('⚠️ Sem permissão no banco de dados');
-  });
+  };
 
-  unsubscribe = () => ref.off('value');
+  // mostra na hora o que ficou guardado da última vez (a internet atualiza logo depois)
+  try{
+    Object.keys(localStorage).filter(k=>k.startsWith('routex_ent_') && k!==chaveCache).forEach(k=>localStorage.removeItem(k));
+    const guardado = JSON.parse(localStorage.getItem(chaveCache)||'null');
+    if(guardado && typeof guardado==='object') aplicar(guardado);
+  }catch(e){}
+
+  _authPronta.then(()=>{
+    if(!ativo) return;
+    ref.on('value', snap=>{
+      const data = snap.val() || {};
+      try{ localStorage.setItem(chaveCache, JSON.stringify(data)); }catch(e){}
+      aplicar(data);
+      // Se histórico aberto, atualiza
+      if(document.getElementById('modalHistorico').classList.contains('show')) renderHistorico();
+    }, err=>{
+      console.error('Firebase (escutar):', err);
+      setSyncStatus('offline','⚠️ Sem acesso ao banco');
+      toast('⚠️ Sem permissão no banco de dados');
+    });
+  });
 }
 
 // ══════════════════════════════════════════

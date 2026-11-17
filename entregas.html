@@ -429,7 +429,11 @@
     <div class="form-card">
       <div class="form-label" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
         <span>Nova entrega</span>
-        <button type="button" class="btn-foto" id="btnFoto" onclick="document.getElementById('inputFotoComanda').click()">📷 Ler comanda</button>
+        <span style="display:flex;gap:6px;">
+          <button type="button" class="btn-foto" id="btnFoto" onclick="document.getElementById('inputFotoCamera').click()">📷 Câmera</button>
+          <button type="button" class="btn-foto" id="btnGaleria" onclick="document.getElementById('inputFotoComanda').click()">🖼️ Galeria</button>
+        </span>
+        <input type="file" id="inputFotoCamera" accept="image/*" capture="environment" style="display:none;" onchange="lerComanda(this)" />
         <input type="file" id="inputFotoComanda" accept="image/*" style="display:none;" onchange="lerComanda(this)" />
       </div>
       <div class="input-row">
@@ -1191,8 +1195,9 @@ async function lerComanda(input){
   input.value = '';
   if(!file) return;
   const btn = document.getElementById('btnFoto');
+  const btnG = document.getElementById('btnGaleria');
   const rotulo = btn.textContent;
-  btn.disabled = true; btn.textContent = '⏳ Preparando...';
+  btn.disabled = true; btnG.disabled = true; btn.textContent = '⏳ Preparando...';
   let worker = null;
   try{
     btn.textContent = '⏳ Baixando leitor...';
@@ -1226,7 +1231,7 @@ async function lerComanda(input){
     toast(navigator.onLine ? '❌ Não consegui ler a foto' : '📡 Sem internet para baixar o leitor (só na 1ª vez)');
   }finally{
     if(worker){ try{ await worker.terminate(); }catch(_){} }
-    btn.disabled = false; btn.textContent = rotulo;
+    btn.disabled = false; btnG.disabled = false; btn.textContent = rotulo;
   }
 }
 

@@ -474,7 +474,7 @@
       </div>
     </div>
     <div class="stats">
-      <div class="stat-card blue" id="btnFoto" onclick="document.getElementById('inputFotoCamera').click()">
+      <div class="stat-card blue" id="btnFoto" onclick="aquecerLeitor();document.getElementById('inputFotoCamera').click()">
         <div class="stat-icon-box">📷</div>
         <div class="stat-info">
           <div class="stat-label" id="lblCamera">Comanda</div>
@@ -482,7 +482,7 @@
         </div>
         <div class="stat-tap-hint"><span class="hint-arrow">›</span></div>
       </div>
-      <div class="stat-card blue" id="btnGaleria" onclick="document.getElementById('inputFotoComanda').click()">
+      <div class="stat-card blue" id="btnGaleria" onclick="aquecerLeitor();document.getElementById('inputFotoComanda').click()">
         <div class="stat-icon-box">🖼️</div>
         <div class="stat-info">
           <div class="stat-label" id="lblGaleria">Comanda</div>
@@ -1364,7 +1364,7 @@ function prepararFoto(bmp, modo, maxLado){
   ctx.putImageData(a,0,0);
   return c;
 }
-const _PREFIXOS_LOG = { 'R':'Rua','RR':'Rua','RUA':'Rua','AV':'Avenida','AVENIDA':'Avenida','AL':'Alameda','ALAMEDA':'Alameda','TV':'Travessa','TRAVESSA':'Travessa',
+const _PREFIXOS_LOG = { 'R':'Rua','RR':'Rua','V':'Avenida','VV':'Avenida','AY':'Avenida','AW':'Avenida','RUA':'Rua','AV':'Avenida','AVENIDA':'Avenida','AL':'Alameda','ALAMEDA':'Alameda','TV':'Travessa','TRAVESSA':'Travessa',
   'PCA':'Praca','PRACA':'Praca','PÇA':'Praca','ROD':'Rodovia','RODOVIA':'Rodovia','EST':'Estrada','ESTRADA':'Estrada' };
 const _NUM_TOK = '(?=[0-9OoBSsgIl]*[0-9])[0-9OoBSsgIl]{1,5}|S\\/?N';
 // o leitor confunde letras com números ("B48" por "848", "o,00" por "0,00")
@@ -1377,19 +1377,22 @@ function _numLimpo(tok){
 // lê UM texto da comanda: acha rua, número e taxa
 function analisarComanda(texto){
   const linhas = String(texto||'').split(/\r?\n/).map(l=>l.replace(/[|_¢@]/g,' ').replace(/\s{2,}/g,' ').trim()).filter(Boolean);
-  const out = { rua:'', numero:'', numExato:false, taxa:null, taxas:[] };
+  const out = { rua:'', numero:'', numExato:false, taxa:null, taxas:[], ruaParcial:'', numTok:'' };
   const reNome = /N[o0]me\s*[:;>]/i;
   const reOutroCampo = /^(bairro|cep|cidade|telefone|fone|tel\b|obs|cod|cliente|entrega|qtde|descri)/i;
-  const reRuaNum = new RegExp('^(?:(RR?|RUA|AV|AVENIDA|AL|ALAMEDA|TV|TRAVESSA|PCA|PRACA|PÇA|ROD|RODOVIA|EST|ESTRADA)[.,]?\\s+)?([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\\s.\\-\']{2,}?)[,\\s]+(?:N[º°o.]?\\s*)?('+_NUM_TOK+')(?![A-Za-z0-9])','i');
+  const reRuaNum = new RegExp('^(?:(RR?|RUA|AV|VV?|AY|AW|AVENIDA|AL|ALAMEDA|TV|TRAVESSA|PCA|PRACA|PÇA|ROD|RODOVIA|EST|ESTRADA)[.,]?\\s+)?([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\\s.\\-\']{2,}?)[,\\s]+(?:N[º°o.]?\\s*)?('+_NUM_TOK+')(?![A-Za-z0-9])','i');
+  const reComplemento = /^(frente|esquina|prox\w*|em frente|apto?s?|ap\.?|apartamento|bloco|bl\.?|casa|fundos|sala|loja|cj\.?|conjunto|andar|sobrado|ref|referencia|obs)\b/i;
   function tentar(l, exigirPrefixo){
+    if(reComplemento.test(l)) return false;
     const m = l.match(reRuaNum);
     if(!m) return false;
+    if(!m[1] && reComplemento.test(m[2])) return false;
     if(exigirPrefixo && !m[1]) return false;
     const nl = _numLimpo(m[3]); if(!nl) return false;
     let nome = m[2].replace(/[\s,.\-]+$/,'').replace(/\s{2,}/g,' ').trim();
     if(nome.replace(/\s/g,'').length < 3) return false;
     out.rua = (m[1] ? (_PREFIXOS_LOG[m[1].toUpperCase()]||'Rua') + ' ' : '') + nome;
-    out.numero = nl.n; out.numExato = nl.exato;
+    out.numero = nl.n; out.numExato = nl.exato; out.numTok = m[3];
     return true;
   }
   let achou = false;
@@ -1411,6 +1414,17 @@ function analisarComanda(texto){
     if(iB>0) cand.push(linhas[iB-1]);
     linhas.forEach(l=>cand.push(l));
     for(const l of cand){ if(!ruim.test(l) && !reOutroCampo.test(l) && tentar(l,false)){ achou = true; break; } }
+  }
+  // 4) achou a rua mas o número foi comido na leitura: guarda só como reserva
+  if(!achou){
+    const reSoRua = /^(RR?|RUA|AV|VV?|AY|AW|AVENIDA|AL|ALAMEDA|TV|TRAVESSA|PCA|PRACA|PÇA|ROD|RODOVIA|EST|ESTRADA)[.,]?\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s.'\-]{3,})$/i;
+    for(const l of linhas){ if(reComplemento.test(l)) continue; const m = l.match(reSoRua); if(m){
+        let nome = m[2].trim(), tok = '';
+        const pal = nome.split(/\s+/);
+        // a última "palavra" curta, só com letras que parecem número (g, s, z, B, O...), é o número mal lido
+        if(pal.length>=2 && /^[OoBSsgIlzZ]{1,4}$/.test(pal[pal.length-1])){ tok = pal.pop(); nome = pal.join(' '); }
+        out.ruaParcial = (_PREFIXOS_LOG[m[1].toUpperCase()]||'Rua')+' '+nome; out.numTok = tok; break;
+      } }
   }
   // taxa: "(+) Tx.Entrega: 6,00" e também "Bairro: TAXA 6,00"
   const reTaxa1 = /(?:T[xX]\.?|Taxa(?:\s+de)?)\s*Entr\w*\.?\s*[:;]?\s*R?\$?\s*([0-9OoSs]{1,3}[.,][0-9Oo]{2})/i;
@@ -1439,6 +1453,7 @@ function consolidarLeituras(lista){
     iguais.sort((a,b)=>a.split(' ').filter(p=>p.length===1).length - b.split(' ').filter(p=>p.length===1).length);
     out.rua = iguais[0];
   }
+  if(!out.rua){ const p = lista.map(r=>r.ruaParcial).find(Boolean); if(p) out.rua = p; }
   const nums = lista.filter(r=>r.numero).map(r=>({k:r.numero, v:r.numero, e:r.numExato}));
   if(nums.length){ const g = mais(nums, it=>it.e?3:1); out.numero = g.v; }
   const taxas = [];
@@ -1448,6 +1463,52 @@ function consolidarLeituras(lista){
 }
 const _MESMA = (a,b)=> a.rua && b.rua && a.numero && a.numero===b.numero &&
   a.rua.toUpperCase().replace(/[^A-Z0-9]/g,'')===b.rua.toUpperCase().replace(/[^A-Z0-9]/g,'') && a.taxa!=null && a.taxa===b.taxa;
+// o "leitor" é carregado em segundo plano assim que você toca em Câmera/Galeria (enquanto tira a foto) e fica pronto por 2 min
+let _workerP = null, _workerTimer = null;
+function obterWorker(){
+  clearTimeout(_workerTimer);
+  if(!_workerP){
+    _workerP = carregarTesseract().then(()=>Tesseract.createWorker('eng', 1, {
+      workerPath: `${TESS_CDN}tesseract.js@${TESS_VER}/dist/worker.min.js`,
+      corePath:   `${TESS_CDN}tesseract.js-core@${TESS_VER}`,
+      langPath:   `${TESS_CDN}@tesseract.js-data/eng/4.0.0_best_int`
+    })).catch(e=>{ _workerP = null; throw e; });
+  }
+  return _workerP;
+}
+function soltarWorkerDepois(ms){
+  clearTimeout(_workerTimer);
+  _workerTimer = setTimeout(()=>{ const p=_workerP; _workerP=null; if(p) p.then(w=>w.terminate()).catch(()=>{}); }, ms);
+}
+function aquecerLeitor(){ obterWorker().catch(()=>{}); soltarWorkerDepois(120000); }
+// uma leitura "boa": endereço com número certo e taxa, sem pedaços soltos de palavra
+function leituraConfiavel(r){
+  if(!r || !r.rua || !r.numero || !r.numExato || !r.taxas.length) return false;
+  const palavras = r.rua.split(' ').slice(1);
+  return palavras.length>=1 && palavras.every(p=>p.length>=2);
+}
+// número escrito em letra grande/negrito costuma sair errado ("gsz" no lugar de 852):
+// recorta só essa palavra, amplia e lê de novo aceitando APENAS dígitos
+async function refinarNumero(worker, canvas, data, r){
+  try{
+    const limpo = t=>String(t||'').replace(/[^A-Za-z0-9]/g,'');
+    const alvo = limpo(r.numTok);
+    const w = (data.words||[]).find(x=>x.bbox && limpo(x.text)===alvo);
+    if(!w) return;
+    const { x0, y0, x1, y1 } = w.bbox, alt = y1-y0, m = Math.round(alt*0.4);
+    const sx = Math.max(0,x0-m), sy = Math.max(0,y0-m);
+    const sw = Math.min(canvas.width-sx, (x1-x0)+2*m), sh = Math.min(canvas.height-sy, alt+2*m);
+    if(sw<5 || sh<5) return;
+    const esc = Math.max(1, 120/sh);
+    const c = document.createElement('canvas'); c.width = Math.round(sw*esc); c.height = Math.round(sh*esc);
+    c.getContext('2d').drawImage(canvas, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    await worker.setParameters({ tessedit_pageseg_mode:'8', tessedit_char_whitelist:'0123456789' });
+    const { data:d2 } = await worker.recognize(c);
+    const dig = String(d2.text||'').replace(/\D/g,'');
+    if(dig.length>=1 && dig.length<=5){ r.numero = dig; r.numExato = true; }
+  }catch(e){ console.warn('refinar número:', e); }
+  finally{ try{ await worker.setParameters({ tessedit_char_whitelist:'' }); }catch(_){} }
+}
 async function lerComanda(input){
   const file = input.files && input.files[0];
   input.value = '';
@@ -1456,34 +1517,28 @@ async function lerComanda(input){
   const lbl = document.getElementById(input.id==='inputFotoCamera' ? 'lblCamera' : 'lblGaleria');
   const rotulo = lbl.textContent;
   const msg = t=>{ lbl.textContent = t; };
-  cardC.classList.add('ocupado'); cardG.classList.add('ocupado'); msg('⏳ Preparando...');
-  let worker = null;
+  cardC.classList.add('ocupado'); cardG.classList.add('ocupado'); msg('⏳ Lendo...');
   try{
-    msg('⏳ Baixando leitor...');
-    await carregarTesseract();
-    const bmp = await abrirFoto(file);
-    let tentativa = 0, total = 4;
-    worker = await Tesseract.createWorker('eng', 1, {
-      workerPath: `${TESS_CDN}tesseract.js@${TESS_VER}/dist/worker.min.js`,
-      corePath:   `${TESS_CDN}tesseract.js-core@${TESS_VER}`,
-      langPath:   `${TESS_CDN}@tesseract.js-data/eng/4.0.0_best_int`,
-      logger: m=>{ if(m.status==='recognizing text') msg(`⏳ Lendo ${tentativa}/${total} · ${Math.round((m.progress||0)*100)}%`); }
-    });
-    // várias tentativas com tratamentos diferentes da foto; para cedo se duas leituras concordam
-    const planos = [ ['plano',1280,'4'], ['plano',1600,'4'], ['plano',1280,'6'], ['cinza',1600,'6'] ];
+    const [worker, bmp] = await Promise.all([ obterWorker(), abrirFoto(file) ]);
+    // tenta primeiro o jeito mais rápido; só refaz com outros tratamentos da foto se a leitura vier incompleta
+    const planos = [ ['cinza',1280,'6'], ['plano',1280,'4'], ['cinza',1600,'6'] ];
     const leituras = []; const textos = [];
     for(const [modo,lado,psm] of planos){
-      tentativa++;
       try{ await worker.setParameters({ tessedit_pageseg_mode:psm, preserve_interword_spaces:'1' }); }catch(_){}
       const canvas = prepararFoto(bmp, modo, lado);
       const { data } = await worker.recognize(canvas);
       textos.push(data.text);
-      leituras.push(analisarComanda(data.text));
-      if(leituras.length>=2){
-        const ult = leituras.slice(-2);
-        if(_MESMA(consolidarLeituras([ult[0]]), consolidarLeituras([ult[1]]))) break;
+      const r = analisarComanda(data.text);
+      if(r.rua && r.numTok && !r.numExato && /\d/.test(r.numTok)) await refinarNumero(worker, canvas, data, r);
+      else if(!r.rua && r.ruaParcial && r.numTok){      // número tão mal lido que nem virou número ("gsz")
+        await refinarNumero(worker, canvas, data, r);
+        if(r.numExato){ r.rua = r.ruaParcial; r.ruaParcial = ''; }
       }
+      leituras.push(r);
+      if(leituraConfiavel(r)) break;
+      if(leituras.length>=2 && _MESMA(consolidarLeituras([leituras[leituras.length-2]]), consolidarLeituras([r]))) break;
     }
+    window._ocrTextos = textos;
     const r = consolidarLeituras(leituras);
     if(!r.rua && r.taxa==null){ toast('⚠️ Não consegui ler a comanda. Tente outra foto, mais reta e com luz.'); return; }
     if(r.rua){
@@ -1495,14 +1550,14 @@ async function lerComanda(input){
       t.value = r.taxa.toFixed(2);
       t.dispatchEvent(new Event('input'));
     }
-    const faltou = [!r.rua && 'o endereço', r.taxa==null && 'a taxa'].filter(Boolean).join(' e ');
+    const faltou = [!r.rua && 'o endereço', r.rua && !r.numero && 'o número', r.taxa==null && 'a taxa'].filter(Boolean).join(' e ');
     toast(faltou ? `⚠️ Não achei ${faltou}. Confira e complete.` : '📷 Li a comanda! Confira e toque em Registrar.');
     document.getElementById(r.rua ? 'inputTaxa' : 'inputRua').scrollIntoView({block:'center',behavior:'smooth'});
   }catch(e){
     console.error('Ler comanda:', e);
     toast(navigator.onLine ? '❌ Não consegui ler a foto' : '📡 Sem internet para baixar o leitor (só na 1ª vez)');
   }finally{
-    if(worker){ try{ await worker.terminate(); }catch(_){} }
+    soltarWorkerDepois(90000);
     cardC.classList.remove('ocupado'); cardG.classList.remove('ocupado'); msg(rotulo);
   }
 }

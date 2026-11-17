@@ -132,6 +132,13 @@
   .stat-sub{font-size:14px;font-weight:800;letter-spacing:-0.2px;line-height:1.1;white-space:nowrap;}
   #lblCamera,#lblGaleria{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .stat-card.ocupado{opacity:.6;pointer-events:none;}
+  .chip-lanch{display:inline-flex;align-items:center;gap:4px;margin-top:3px;align-self:flex-start;background:rgba(96,165,250,0.12);color:var(--accent);
+    border:1px solid rgba(96,165,250,0.3);border-radius:20px;padding:2px 9px;font-size:11px;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;}
+  .chip-lanch:active{opacity:.7;}
+  #modalLanch{align-items:center;justify-content:center;padding:16px;}
+  #modalLanch .modal-sheet{height:auto;max-height:90%;max-width:400px;border-radius:24px;border-bottom:1px solid var(--glass-border);transform:translateY(16px) scale(.97);overflow-y:auto;}
+  #modalLanch.show .modal-sheet{transform:none;}
+  .lanch-op.atual{border-color:rgba(96,165,250,0.7);background:rgba(96,165,250,0.12);}
   .btn-add{background:linear-gradient(135deg,#3b6ef0,#818cf8);color:#fff;border:none;
     border-radius:var(--radius-sm);padding:12px 16px;font-size:14px;font-weight:800;
     font-family:'Inter',sans-serif;cursor:pointer;
@@ -418,6 +425,7 @@
         <div class="logo-text">
           <h1 id="appNomeHeader">Entregador</h1>
           <span id="appDataHeader"></span>
+          <button class="chip-lanch" id="chipLanch" style="display:none" onclick="abrirEscolhaLanch(false)">🏪 <span id="chipLanchNome"></span> ▾</button>
         </div>
       </div>
       <div class="header-right">
@@ -562,6 +570,15 @@
       <div id="listaPerfiis"></div>
     </div>
 
+  </div>
+</div>
+
+<!-- JANELA: ESCOLHER LANCHONETE -->
+<div class="modal-overlay" id="modalLanch" onclick="fecharEscolhaLanch(event)">
+  <div class="modal-sheet">
+    <div style="font-size:19px;font-weight:900;letter-spacing:-0.4px;margin-bottom:4px;">🏪 Onde você vai trabalhar?</div>
+    <div style="font-size:12px;color:var(--text2);font-weight:500;margin-bottom:14px;line-height:1.4;">As sugestões de endereço e taxa mudam conforme a lanchonete.</div>
+    <div id="lanchOpcoes" style="display:flex;flex-direction:column;gap:10px;"></div>
   </div>
 </div>
 
@@ -800,6 +817,148 @@ function guardarPerfisNoCelular(v){
 }
 let tipoSessao = null;
 
+// ══════════════════════════════════════════
+//  LANCHONETES  (cadastradas pelo ADM em config/lanchonetes)
+//  "Fátima" sempre existe e é onde ficam todas as entregas antigas (as que não têm o campo "lanchonete").
+// ══════════════════════════════════════════
+const LANCH_PADRAO = 'fatima';
+const LANCH_CACHE_KEY = 'routex_lanchs_v1';
+let LANCHS = { fatima:{ nome:'Fátima' } };
+let _lanchsDoCache = false;
+try{
+  const c = JSON.parse(localStorage.getItem(LANCH_CACHE_KEY)||'null');
+  if(c && typeof c==='object'){ LANCHS = { fatima:{ nome:'Fátima' }, ...c }; _lanchsDoCache = true; }
+}catch(e){}
+let lanchAtual = LANCH_PADRAO;
+let _lanchObrigatoria = false;
+let _lanchsProntas; const _lanchsPromise = new Promise(r=>{ _lanchsProntas=r; }); setTimeout(()=>_lanchsProntas(), 2500);
+function nomeLanch(id){ return (LANCHS[id] && LANCHS[id].nome) || (id===LANCH_PADRAO ? 'Fátima' : id); }
+function listaLanchs(){
+  return Object.entries(LANCHS).map(([id,l])=>({ id, nome:(l&&l.nome)||id }))
+    .sort((a,b)=> a.id===LANCH_PADRAO ? -1 : b.id===LANCH_PADRAO ? 1 : a.nome.localeCompare(b.nome));
+}
+function escutarLanchonetes(){
+  _authPronta.then(()=>{
+    db.ref('config/lanchonetes').on('value', snap=>{
+      const v = snap.val() || {};
+      const novo = { fatima:{ nome:'Fátima' } };
+      Object.entries(v).forEach(([id,l])=>{ if(id!==LANCH_PADRAO && l && l.nome) novo[id] = { nome:String(l.nome) }; });
+      LANCHS = novo;
+      try{ const c = {...novo}; delete c.fatima; localStorage.setItem(LANCH_CACHE_KEY, JSON.stringify(c)); }catch(e){}
+      _lanchsProntas();
+      lanchonetesMudaram();
+    }, err=>{ console.error('Firebase (lanchonetes):', err); _lanchsProntas(); });
+  });
+}
+function lanchonetesMudaram(){
+  if(usuarioAtual && tipoSessao==='entregador'){
+    if(!LANCHS[lanchAtual]){ lanchAtual = LANCH_PADRAO; usarHistoricoDaLanch(); }
+    atualizarChipLanch();
+    if(document.getElementById('modalLanch').classList.contains('show')) renderEscolhaLanch();
+  }
+  const pa = document.getElementById('pageAdm');
+  if(tipoSessao==='adm' && abaAdmAtiva==='perfis' && pa && pa.classList.contains('active')) renderLanchsAdm();
+}
+function atualizarChipLanch(){
+  const chip = document.getElementById('chipLanch'); if(!chip) return;
+  const varias = listaLanchs().length > 1;
+  chip.style.display = (varias && tipoSessao==='entregador') ? '' : 'none';
+  document.getElementById('chipLanchNome').textContent = nomeLanch(lanchAtual);
+}
+function lanchSalva(){ try{ return localStorage.getItem('routex_lanch_'+usuarioAtual); }catch(e){ return null; } }
+function definirLanch(id){
+  lanchAtual = LANCHS[id] ? id : LANCH_PADRAO;
+  try{ localStorage.setItem('routex_lanch_'+usuarioAtual, lanchAtual); }catch(e){}
+  usarHistoricoDaLanch();
+  atualizarChipLanch();
+}
+// chamada quando o entregador entra: decide se mostra a janela
+async function prepararLanchonete(porLogin){
+  const quem = usuarioAtual;
+  if(!_lanchsDoCache) await _lanchsPromise;
+  if(usuarioAtual !== quem) return;                 // saiu enquanto esperava
+  const salvo = lanchSalva();
+  if(listaLanchs().length <= 1){ definirLanch(LANCH_PADRAO); return; }
+  lanchAtual = LANCHS[salvo] ? salvo : LANCH_PADRAO;
+  usarHistoricoDaLanch(); atualizarChipLanch();
+  if(porLogin || !LANCHS[salvo]) abrirEscolhaLanch(true);
+}
+function abrirEscolhaLanch(obrigatoria){
+  _lanchObrigatoria = !!obrigatoria;
+  renderEscolhaLanch();
+  document.getElementById('modalLanch').classList.add('show');
+}
+function renderEscolhaLanch(){
+  document.getElementById('lanchOpcoes').innerHTML = listaLanchs().map(l=>`
+    <div class="stat-card blue lanch-op ${l.id===lanchAtual?'atual':''}" onclick="escolherLanch('${l.id}')">
+      <div class="stat-icon-box">🏪</div>
+      <div class="stat-info"><div class="stat-label">Lanchonete</div><div class="stat-sub" style="font-size:17px;white-space:normal;">${escHtml(l.nome)}</div></div>
+      <div class="stat-tap-hint"><span class="hint-arrow" style="font-size:20px;color:var(--accent);">${l.id===lanchAtual?'✓':'›'}</span></div>
+    </div>`).join('');
+}
+function escolherLanch(id){
+  definirLanch(id);
+  _lanchObrigatoria = false;
+  document.getElementById('modalLanch').classList.remove('show');
+  toast('🏪 ' + nomeLanch(lanchAtual));
+}
+function fecharEscolhaLanch(ev){
+  if(_lanchObrigatoria) return;                      // no login precisa escolher
+  if(!ev || ev.target===document.getElementById('modalLanch')) document.getElementById('modalLanch').classList.remove('show');
+}
+// histórico de endereços/taxas separado por lanchonete
+let histPorLanch = {};
+function usarHistoricoDaLanch(){ enderecoHistorico = histPorLanch[lanchAtual] = histPorLanch[lanchAtual] || {}; }
+
+// ── cadastro de lanchonetes (só ADM, aba Perfis) ──
+function slugLanch(nome){
+  return nome.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,30);
+}
+function renderLanchsAdm(){
+  const box = document.getElementById('lanchAdmLista'); if(!box) return;
+  const extras = listaLanchs().filter(l=>l.id!==LANCH_PADRAO);
+  box.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;font-weight:700;">🏪 <span style="flex:1;">Fátima</span><span style="font-size:11px;color:var(--text2);font-weight:600;">padrão</span></div>` +
+    extras.map(l=>`<div style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;font-weight:700;">🏪 <span style="flex:1;">${escHtml(l.nome)}</span>
+      <button id="remLanch_${l.id}" onclick="removerLanch('${l.id}')" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:var(--text2);border-radius:8px;padding:6px 10px;font-size:11.5px;font-weight:700;font-family:'Inter',sans-serif;cursor:pointer;">Remover</button></div>`).join('');
+}
+function adicionarLanch(){
+  const inp = document.getElementById('inputNovaLanch');
+  const nome = (inp.value||'').trim().replace(/\s+/g,' ');
+  if(nome.length < 2){ toast('Digite o nome da lanchonete'); return; }
+  if(listaLanchs().some(l=>semAcento(l.nome)===semAcento(nome))){ toast('Essa lanchonete já existe'); return; }
+  let id = slugLanch(nome) || 'lanchonete', base = id, n = 2;
+  while(LANCHS[id]) id = base + '-' + (n++);
+  db.ref('config/lanchonetes/'+id).set({ nome })
+    .then(()=>{ inp.value=''; toast('✓ '+nome+' cadastrada!'); })
+    .catch(err=>{ console.error(err); toast('❌ Não consegui cadastrar'); });
+}
+const _remLanchPend = {};
+function removerLanch(id){
+  const btn = document.getElementById('remLanch_'+id);
+  if(!_remLanchPend[id]){
+    _remLanchPend[id] = setTimeout(()=>{ delete _remLanchPend[id]; if(btn) btn.textContent='Remover'; }, 3000);
+    if(btn) btn.textContent = 'Confirmar?';
+    return;
+  }
+  clearTimeout(_remLanchPend[id]); delete _remLanchPend[id];
+  db.ref('config/lanchonetes/'+id).remove()
+    .then(()=>toast('Lanchonete removida (as entregas já feitas continuam salvas)'))
+    .catch(err=>{ console.error(err); toast('❌ Não consegui remover'); });
+}
+function htmlLanchAdm(){
+  const inp = "flex:1;min-width:0;background:rgba(0,0,0,0.3);border:1.5px solid rgba(96,165,250,0.4);border-radius:10px;padding:10px 12px;color:#f0f4ff;font-size:13px;font-weight:600;font-family:'Inter',sans-serif;outline:none;-webkit-appearance:none;box-sizing:border-box;";
+  return `<div class="perfil-item" style="margin-top:14px;">
+      <div class="perfil-nome" style="margin-bottom:4px;">🏪 Lanchonetes</div>
+      <div style="font-size:11.5px;color:var(--text2);line-height:1.45;">Cada lanchonete tem as suas próprias sugestões de endereço e taxa. Todas as entregas antigas ficam na Fátima. Quando houver mais de uma, o entregador escolhe ao entrar.</div>
+      <div id="lanchAdmLista"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <input type="text" id="inputNovaLanch" placeholder="Nome da nova lanchonete" maxlength="40" autocomplete="off" style="${inp}" onkeydown="if(event.key==='Enter')adicionarLanch()">
+        <button class="btn-perfil-salvar" onclick="adicionarLanch()">＋ Adicionar</button>
+      </div>
+    </div>`;
+}
+escutarLanchonetes();
+
 _authPronta.then(()=>{
 db.ref('perfis').on('value', snap=>{
   const v = snap.val();
@@ -996,7 +1155,7 @@ async function fazerLogin(){
   try{ localStorage.setItem('routex_session', JSON.stringify({ user, ts: Date.now() })); }catch(e){}
   document.getElementById('loginNome').value  = '';
   document.getElementById('loginSenha').value = '';
-  entrarApp();
+  entrarApp(true);
 }
 
 // Tenta restaurar sessão salva ao abrir o app
@@ -1020,7 +1179,7 @@ function _restaurarSessao(){
 document.getElementById('loginNome').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('loginSenha').focus(); });
 document.getElementById('loginSenha').addEventListener('keydown', e=>{ if(e.key==='Enter') fazerLogin(); });
 
-function entrarApp(){
+function entrarApp(porLogin){
   const tipo = USUARIOS[usuarioAtual].tipo;
   tipoSessao = tipo;
   diaEscutando = hoje();
@@ -1043,6 +1202,7 @@ function entrarApp(){
   escutarEntregas();
   _authPronta.then(carregarHistoricoEnderecos);
   _authPronta.then(enviarFila);
+  prepararLanchonete(!!porLogin);
 }
 
 function sair(){
@@ -1051,6 +1211,7 @@ function sair(){
   // Remove sessão salva ao sair manualmente
   try{ localStorage.removeItem('routex_session'); }catch(e){}
   usuarioAtual=null; idAtual=null; entAtual=null; entregasLocal=[]; diaEscutando=null; tipoSessao=null;
+  _lanchObrigatoria=false; document.getElementById('modalLanch').classList.remove('show'); lanchAtual=LANCH_PADRAO; document.getElementById('chipLanch').style.display='none';
   mostrarPagina('pageLogin');
 }
 
@@ -1366,7 +1527,7 @@ function chaveEndereco(rua, numero){
 
 // Carrega histórico de todos os dias do Firebase pra montar autocomplete
 function carregarHistoricoEnderecos(){
-  enderecoHistorico = {};
+  histPorLanch = {}; enderecoHistorico = {};
 
   // Busca todas as entregas de todos os usuários pra ter histórico completo de endereços
   db.ref('entregas').once('value', snap=>{
@@ -1378,28 +1539,30 @@ function carregarHistoricoEnderecos(){
         Object.values(dia).forEach(e=>{
           if(!e || !e.rua) return;
           const chave = chaveEndereco(e.rua, e.numero);
+          const mapaL = histPorLanch[e.lanchonete || LANCH_PADRAO] = histPorLanch[e.lanchonete || LANCH_PADRAO] || {};
           // Guarda sempre o nome mais completo (com "Rua" na frente)
           const ruaFull = temPrefixoLog(e.rua)
             ? e.rua.trim()
             : 'Rua ' + normalizarRua(e.rua);
-          if(!enderecoHistorico[chave]){
-            enderecoHistorico[chave] = {
+          if(!mapaL[chave]){
+            mapaL[chave] = {
               rua: ruaFull,
               numero: (e.numero||'S/N').trim(),
               taxa: e.taxa||0,
               count: 1
             };
           } else {
-            enderecoHistorico[chave].count++;
-            enderecoHistorico[chave].taxa = e.taxa||enderecoHistorico[chave].taxa;
+            mapaL[chave].count++;
+            mapaL[chave].taxa = e.taxa||mapaL[chave].taxa;
             // Prefere o nome mais longo (mais completo)
-            if(ruaFull.length > enderecoHistorico[chave].rua.length){
-              enderecoHistorico[chave].rua = ruaFull;
+            if(ruaFull.length > mapaL[chave].rua.length){
+              mapaL[chave].rua = ruaFull;
             }
           }
         });
       });
     });
+    usarHistoricoDaLanch();
     console.log('Histórico carregado:', Object.keys(enderecoHistorico).length, 'endereços');
   }, err=>{
     console.error('Firebase (histórico):', err);
@@ -1532,7 +1695,7 @@ function adicionarEntrega(){
     : 'Rua ' + normalizarRua(ruaSemAc);
 
   const id  = Date.now();
-  const ent = { id, rua: ruaNorm, numero: numero||'S/N', taxa, ts: id, user: usuarioAtual };
+  const ent = { id, rua: ruaNorm, numero: numero||'S/N', taxa, ts: id, user: usuarioAtual, lanchonete: lanchAtual };
 
   // Salva no Firebase (com fila offline)
   salvarComFila(`${pathUser(usuarioAtual)}/${id}`, ent).catch(err=>{
@@ -2177,7 +2340,7 @@ _authPronta.then(()=>{
 function mostrarSugestaoTaxa(km){
   const sug = taxaPorKm(km);
   const b = document.getElementById('detSugTaxa');
-  if(sug==null || !entAtual || Math.abs(sug - Number(entAtual.taxa)) < 0.005){ b.style.display='none'; _taxaSug=null; return; }
+  if(sug==null || (entAtual && (entAtual.lanchonete||LANCH_PADRAO)!==LANCH_PADRAO) || !entAtual || Math.abs(sug - Number(entAtual.taxa)) < 0.005){ b.style.display='none'; _taxaSug=null; return; }
   _taxaSug = sug;
   b.innerHTML = `💡 Taxa sugerida pela distância:<br><b style="font-size:17px;white-space:nowrap;">${fmt(sug)}</b><br><span style="font-size:11px;font-weight:600;opacity:.8;">Toque para aplicar</span>`;
   b.style.display = 'block';
@@ -2283,7 +2446,7 @@ async function carregarInfoBackup(){
 }
 function htmlConfigExtras(){
   const btn = "border-radius:10px;padding:10px 12px;font-size:12.5px;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;";
-  return `
+  return (tipoSessao==='adm' ? htmlLanchAdm() : '') + `
     <div class="perfil-item" id="cardFaixas" style="margin-top:14px;">
       <div class="perfil-nome" style="margin-bottom:4px;">💰 Taxa sugerida por distância</div>
       <div style="font-size:11.5px;color:var(--text2);line-height:1.45;" id="faixasNota"></div>
@@ -2392,6 +2555,7 @@ function renderPerfiis(){
     </div>
   `).join('') + htmlConfigExtras();
   renderFaixasEditor();
+  renderLanchsAdm();
   carregarInfoBackup();
 }
 function editarPerfil(user){ document.getElementById(`form_${user}`).style.display='block'; }

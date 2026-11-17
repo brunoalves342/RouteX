@@ -1164,45 +1164,129 @@ function carregarTesseract(){
   });
   return _tessPromise;
 }
-// reduz a foto (celular tira foto enorme), tira a cor e reforça o contraste → leitura mais rápida e certa
-async function prepararFoto(file){
-  let bmp;
-  try{ bmp = await createImageBitmap(file, { imageOrientation:'from-image' }); }
+// abre a foto já na posição certa (celular grava a foto "deitada" com um aviso de rotação)
+async function abrirFoto(file){
+  try{ return await createImageBitmap(file, { imageOrientation:'from-image' }); }
   catch(_){
-    bmp = await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=URL.createObjectURL(file); });
+    return await new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=rej; im.src=URL.createObjectURL(file); });
   }
+}
+// modo 'cinza': tira a cor e reforça o contraste
+// modo 'plano': também apaga sombras e manchas de luz (foto tirada na mão, com dedo, papel dobrado)
+function prepararFoto(bmp, modo, maxLado){
   const w0 = bmp.width||bmp.naturalWidth, h0 = bmp.height||bmp.naturalHeight;
-  const esc = Math.min(1, 1600/Math.max(w0,h0));
-  const c = document.createElement('canvas'); c.width = Math.round(w0*esc); c.height = Math.round(h0*esc);
-  const ctx = c.getContext('2d');
-  ctx.filter = 'grayscale(1) contrast(1.35)';
-  ctx.drawImage(bmp, 0, 0, c.width, c.height);
+  const esc = maxLado/Math.max(w0,h0);
+  const w = Math.round(w0*esc), h = Math.round(h0*esc);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently:true });
+  ctx.filter = 'grayscale(1)';
+  ctx.drawImage(bmp, 0, 0, w, h);
+  ctx.filter = 'none';
+  if(modo === 'cinza'){
+    const id = ctx.getImageData(0,0,w,h), d = id.data;
+    for(let i=0;i<d.length;i+=4){ const v = Math.max(0,Math.min(255,(d[i]-128)*1.35+128)); d[i]=d[i+1]=d[i+2]=v; }
+    ctx.putImageData(id,0,0);
+    return c;
+  }
+  // plano: subtrai uma versão bem borrada (o "fundo de luz") da própria foto
+  const b = document.createElement('canvas'); b.width = w; b.height = h;
+  const bx = b.getContext('2d', { willReadFrequently:true });
+  const raio = Math.max(4, Math.round(Math.max(w,h)/50));
+  bx.filter = `blur(${raio}px)`;
+  bx.drawImage(c,0,0,w,h);
+  bx.filter = 'none';
+  const a = ctx.getImageData(0,0,w,h), f = bx.getImageData(0,0,w,h), da = a.data, df = f.data;
+  for(let i=0;i<da.length;i+=4){
+    const v = Math.max(0,Math.min(255, 128 + (da[i]-df[i])*2.2));
+    da[i]=da[i+1]=da[i+2]=v;
+  }
+  ctx.putImageData(a,0,0);
   return c;
 }
-const _PREFIXOS_LOG = { 'R':'Rua','RUA':'Rua','AV':'Avenida','AVENIDA':'Avenida','AL':'Alameda','ALAMEDA':'Alameda','TV':'Travessa','TRAVESSA':'Travessa',
+const _PREFIXOS_LOG = { 'R':'Rua','RR':'Rua','RUA':'Rua','AV':'Avenida','AVENIDA':'Avenida','AL':'Alameda','ALAMEDA':'Alameda','TV':'Travessa','TRAVESSA':'Travessa',
   'PCA':'Praca','PRACA':'Praca','PÇA':'Praca','ROD':'Rodovia','RODOVIA':'Rodovia','EST':'Estrada','ESTRADA':'Estrada' };
-// acha rua, número e taxa no texto lido
+const _NUM_TOK = '(?=[0-9OoBSsgIl]*[0-9])[0-9OoBSsgIl]{1,5}|S\\/?N';
+// o leitor confunde letras com números ("B48" por "848", "o,00" por "0,00")
+function _numLimpo(tok){
+  if(/^S\/?N$/i.test(tok)) return { n:'S/N', exato:true };
+  if(!/\d/.test(tok)) return null;
+  const exato = /^\d+$/.test(tok);
+  return { n: tok.replace(/[Oo]/g,'0').replace(/B/g,'8').replace(/[Ss]/g,'5').replace(/g/g,'9').replace(/[Il]/g,'1'), exato };
+}
+// lê UM texto da comanda: acha rua, número e taxa
 function analisarComanda(texto){
-  const linhas = String(texto||'').split(/\r?\n/).map(l=>l.replace(/[|_]/g,' ').trim()).filter(Boolean);
-  const out = { rua:'', numero:'', taxa:null };
-  const reRua = /^(R|RUA|AV|AVENIDA|AL|ALAMEDA|TV|TRAVESSA|PCA|PRACA|PÇA|ROD|RODOVIA|EST|ESTRADA)[.,]?\s+(.+?)[,\s]+(?:N[º°o.]?\s*)?(\d{1,5}|S\/?N)\b/i;
-  for(const l of linhas){
-    const m = l.match(reRua);
-    if(m){
-      let nome = m[2].replace(/[\s,.\-]+$/,'').replace(/\s{2,}/g,' ').trim();
-      if(nome.length < 2) continue;
-      out.rua = (_PREFIXOS_LOG[m[1].toUpperCase()]||'Rua') + ' ' + nome;
-      out.numero = /^S\/?N$/i.test(m[3]) ? 'S/N' : m[3];
-      break;
+  const linhas = String(texto||'').split(/\r?\n/).map(l=>l.replace(/[|_¢@]/g,' ').replace(/\s{2,}/g,' ').trim()).filter(Boolean);
+  const out = { rua:'', numero:'', numExato:false, taxa:null, taxas:[] };
+  const reNome = /N[o0]me\s*[:;>]/i;
+  const reOutroCampo = /^(bairro|cep|cidade|telefone|fone|tel\b|obs|cod|cliente|entrega|qtde|descri)/i;
+  const reRuaNum = new RegExp('^(?:(RR?|RUA|AV|AVENIDA|AL|ALAMEDA|TV|TRAVESSA|PCA|PRACA|PÇA|ROD|RODOVIA|EST|ESTRADA)[.,]?\\s+)?([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\\s.\\-\']{2,}?)[,\\s]+(?:N[º°o.]?\\s*)?('+_NUM_TOK+')(?![A-Za-z0-9])','i');
+  function tentar(l, exigirPrefixo){
+    const m = l.match(reRuaNum);
+    if(!m) return false;
+    if(exigirPrefixo && !m[1]) return false;
+    const nl = _numLimpo(m[3]); if(!nl) return false;
+    let nome = m[2].replace(/[\s,.\-]+$/,'').replace(/\s{2,}/g,' ').trim();
+    if(nome.replace(/\s/g,'').length < 3) return false;
+    out.rua = (m[1] ? (_PREFIXOS_LOG[m[1].toUpperCase()]||'Rua') + ' ' : '') + nome;
+    out.numero = nl.n; out.numExato = nl.exato;
+    return true;
+  }
+  let achou = false;
+  // 1) endereço = linha logo abaixo de "Nome:" (com ou sem a palavra Rua)
+  const iNome = linhas.findIndex(l=>reNome.test(l));
+  if(iNome >= 0){
+    for(let k=iNome+1; k<=iNome+2 && k<linhas.length && !achou; k++){
+      if(reOutroCampo.test(linhas[k])) break;
+      achou = tentar(linhas[k], false);
     }
   }
-  const reTaxa = /(?:T[xX]\.?|Taxa(?:\s+de)?)\s*Entr\w*\.?\s*[:;]?\s*R?\$?\s*(\d{1,3}(?:[.,]\d{2}))/i;
-  for(const l of linhas){
-    const m = l.match(reTaxa);
-    if(m){ out.taxa = parseFloat(m[1].replace(',','.')); break; }
+  // 2) qualquer linha que comece com Rua / R. / Av. ...
+  if(!achou){ for(const l of linhas){ if(tentar(l, true)){ achou = true; break; } } }
+  // 3) sem "Nome:" e sem "Rua": linha de texto + número, de preferência logo acima de "Bairro"
+  if(!achou){
+    const ruim = /[:]|R\$|\d[.,]\d|\bx\b/i;
+    const iB = linhas.findIndex(l=>/bairro/i.test(l));
+    const cand = [];
+    if(iB>0) cand.push(linhas[iB-1]);
+    linhas.forEach(l=>cand.push(l));
+    for(const l of cand){ if(!ruim.test(l) && !reOutroCampo.test(l) && tentar(l,false)){ achou = true; break; } }
   }
+  // taxa: "(+) Tx.Entrega: 6,00" e também "Bairro: TAXA 6,00"
+  const reTaxa1 = /(?:T[xX]\.?|Taxa(?:\s+de)?)\s*Entr\w*\.?\s*[:;]?\s*R?\$?\s*([0-9OoSs]{1,3}[.,][0-9Oo]{2})/i;
+  const reTaxa2 = /TAXA\s*R?\$?\s*(\d{1,3}[.,]\d{2})/i;
+  const aNum = s=>parseFloat(s.replace(/[Oo]/g,'0').replace(/[Ss]/g,'5').replace(',','.'));
+  for(const l of linhas){
+    let m = l.match(reTaxa1);
+    if(m){ const v=aNum(m[1]); if(isFinite(v)&&v>0&&v<=1000) out.taxas.push(v); continue; }
+    m = l.match(reTaxa2);
+    if(m){ const v=aNum(m[1]); if(isFinite(v)&&v>0&&v<=1000) out.taxas.push(v); }
+  }
+  if(out.taxas.length) out.taxa = out.taxas[0];
   return out;
 }
+// junta as leituras das várias tentativas: vale o que mais se repete
+function consolidarLeituras(lista){
+  const chave = s=>String(s).toUpperCase().replace(/[^A-Z0-9]/g,'');
+  const mais = (itens, peso)=>{ const mp=new Map(); itens.forEach(it=>{ const k=it.k; const o=mp.get(k)||{k,v:it.v,p:0}; o.p+=(peso?peso(it):1); if(it.pref) o.v=it.v; mp.set(k,o); });
+    return [...mp.values()].sort((a,b)=>b.p-a.p)[0]; };
+  const out = { rua:'', numero:'', taxa:null };
+  const ruas = lista.filter(r=>r.rua).map(r=>({k:chave(r.rua), v:r.rua, pref:false}));
+  // pra cada grupo de ruas iguais, o texto com menos "pedacinhos" soltos (ex.: "TAVARE S") ganha
+  if(ruas.length){
+    const g = mais(ruas);
+    const iguais = ruas.filter(x=>x.k===g.k).map(x=>x.v);
+    iguais.sort((a,b)=>a.split(' ').filter(p=>p.length===1).length - b.split(' ').filter(p=>p.length===1).length);
+    out.rua = iguais[0];
+  }
+  const nums = lista.filter(r=>r.numero).map(r=>({k:r.numero, v:r.numero, e:r.numExato}));
+  if(nums.length){ const g = mais(nums, it=>it.e?3:1); out.numero = g.v; }
+  const taxas = [];
+  lista.forEach(r=>(r.taxas||[]).forEach(v=>taxas.push({k:v.toFixed(2),v})));
+  if(taxas.length){ out.taxa = mais(taxas).v; }
+  return out;
+}
+const _MESMA = (a,b)=> a.rua && b.rua && a.numero && a.numero===b.numero &&
+  a.rua.toUpperCase().replace(/[^A-Z0-9]/g,'')===b.rua.toUpperCase().replace(/[^A-Z0-9]/g,'') && a.taxa!=null && a.taxa===b.taxa;
 async function lerComanda(input){
   const file = input.files && input.files[0];
   input.value = '';
@@ -1216,17 +1300,30 @@ async function lerComanda(input){
   try{
     msg('⏳ Baixando leitor...');
     await carregarTesseract();
-    const canvas = await prepararFoto(file);
+    const bmp = await abrirFoto(file);
+    let tentativa = 0, total = 4;
     worker = await Tesseract.createWorker('eng', 1, {
       workerPath: `${TESS_CDN}tesseract.js@${TESS_VER}/dist/worker.min.js`,
       corePath:   `${TESS_CDN}tesseract.js-core@${TESS_VER}`,
       langPath:   `${TESS_CDN}@tesseract.js-data/eng/4.0.0_best_int`,
-      logger: m=>{ if(m.status==='recognizing text') msg(`⏳ Lendo ${Math.round((m.progress||0)*100)}%`); }
+      logger: m=>{ if(m.status==='recognizing text') msg(`⏳ Lendo ${tentativa}/${total} · ${Math.round((m.progress||0)*100)}%`); }
     });
-    try{ await worker.setParameters({ tessedit_pageseg_mode:'6', preserve_interword_spaces:'1' }); }catch(_){}
-    msg('⏳ Lendo...');
-    const { data } = await worker.recognize(canvas);
-    const r = analisarComanda(data.text);
+    // várias tentativas com tratamentos diferentes da foto; para cedo se duas leituras concordam
+    const planos = [ ['plano',1280,'4'], ['plano',1600,'4'], ['plano',1280,'6'], ['cinza',1600,'6'] ];
+    const leituras = []; const textos = [];
+    for(const [modo,lado,psm] of planos){
+      tentativa++;
+      try{ await worker.setParameters({ tessedit_pageseg_mode:psm, preserve_interword_spaces:'1' }); }catch(_){}
+      const canvas = prepararFoto(bmp, modo, lado);
+      const { data } = await worker.recognize(canvas);
+      textos.push(data.text);
+      leituras.push(analisarComanda(data.text));
+      if(leituras.length>=2){
+        const ult = leituras.slice(-2);
+        if(_MESMA(consolidarLeituras([ult[0]]), consolidarLeituras([ult[1]]))) break;
+      }
+    }
+    const r = consolidarLeituras(leituras);
     if(!r.rua && r.taxa==null){ toast('⚠️ Não consegui ler a comanda. Tente outra foto, mais reta e com luz.'); return; }
     if(r.rua){
       document.getElementById('inputRua').value    = removerAcentos(r.rua);
@@ -1239,7 +1336,7 @@ async function lerComanda(input){
     }
     const faltou = [!r.rua && 'o endereço', r.taxa==null && 'a taxa'].filter(Boolean).join(' e ');
     toast(faltou ? `⚠️ Não achei ${faltou}. Confira e complete.` : '📷 Li a comanda! Confira e toque em Registrar.');
-    document.getElementById(r.rua ? (r.taxa!=null ? 'inputTaxa' : 'inputTaxa') : 'inputRua').scrollIntoView({block:'center',behavior:'smooth'});
+    document.getElementById(r.rua ? 'inputTaxa' : 'inputRua').scrollIntoView({block:'center',behavior:'smooth'});
   }catch(e){
     console.error('Ler comanda:', e);
     toast(navigator.onLine ? '❌ Não consegui ler a foto' : '📡 Sem internet para baixar o leitor (só na 1ª vez)');

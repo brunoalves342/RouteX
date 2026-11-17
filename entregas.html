@@ -129,8 +129,9 @@
   .ac-taxa{font-size:12px;font-weight:700;color:#34d399;}
   .ac-hl{color:#60a5fa;font-weight:800;}
 
-  .btn-foto{background:rgba(96,165,250,0.12);color:var(--accent);border:1px solid rgba(96,165,250,0.3);border-radius:10px;padding:6px 12px;font-size:11.5px;font-weight:800;font-family:'Inter',sans-serif;cursor:pointer;letter-spacing:0;text-transform:none;white-space:nowrap;}
-  .btn-foto:active{opacity:.75;} .btn-foto:disabled{opacity:.6;cursor:default;}
+  .stat-sub{font-size:14px;font-weight:800;letter-spacing:-0.2px;line-height:1.1;white-space:nowrap;}
+  #lblCamera,#lblGaleria{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .stat-card.ocupado{opacity:.6;pointer-events:none;}
   .btn-add{background:linear-gradient(135deg,#3b6ef0,#818cf8);color:#fff;border:none;
     border-radius:var(--radius-sm);padding:12px 16px;font-size:14px;font-weight:800;
     font-family:'Inter',sans-serif;cursor:pointer;
@@ -427,15 +428,7 @@
   </div>
   <div class="fixed-area">
     <div class="form-card">
-      <div class="form-label" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <span>Nova entrega</span>
-        <span style="display:flex;gap:6px;">
-          <button type="button" class="btn-foto" id="btnFoto" onclick="document.getElementById('inputFotoCamera').click()">📷 Câmera</button>
-          <button type="button" class="btn-foto" id="btnGaleria" onclick="document.getElementById('inputFotoComanda').click()">🖼️ Galeria</button>
-        </span>
-        <input type="file" id="inputFotoCamera" accept="image/*" capture="environment" style="display:none;" onchange="lerComanda(this)" />
-        <input type="file" id="inputFotoComanda" accept="image/*" style="display:none;" onchange="lerComanda(this)" />
-      </div>
+      <div class="form-label">Nova entrega</div>
       <div class="input-row">
         <div class="input-group">
           <label>Rua / Avenida</label>
@@ -472,6 +465,26 @@
         </div>
       </div>
     </div>
+    <div class="stats">
+      <div class="stat-card blue" id="btnFoto" onclick="document.getElementById('inputFotoCamera').click()">
+        <div class="stat-icon-box">📷</div>
+        <div class="stat-info">
+          <div class="stat-label" id="lblCamera">Comanda</div>
+          <div class="stat-sub">Tirar foto</div>
+        </div>
+        <div class="stat-tap-hint"><span class="hint-arrow">›</span></div>
+      </div>
+      <div class="stat-card blue" id="btnGaleria" onclick="document.getElementById('inputFotoComanda').click()">
+        <div class="stat-icon-box">🖼️</div>
+        <div class="stat-info">
+          <div class="stat-label" id="lblGaleria">Comanda</div>
+          <div class="stat-sub">Da galeria</div>
+        </div>
+        <div class="stat-tap-hint"><span class="hint-arrow">›</span></div>
+      </div>
+    </div>
+    <input type="file" id="inputFotoCamera" accept="image/*" capture="environment" style="display:none;" onchange="lerComanda(this)" />
+    <input type="file" id="inputFotoComanda" accept="image/*" style="display:none;" onchange="lerComanda(this)" />
   </div>
 </div>
 
@@ -1194,23 +1207,24 @@ async function lerComanda(input){
   const file = input.files && input.files[0];
   input.value = '';
   if(!file) return;
-  const btn = document.getElementById('btnFoto');
-  const btnG = document.getElementById('btnGaleria');
-  const rotulo = btn.textContent;
-  btn.disabled = true; btnG.disabled = true; btn.textContent = '⏳ Preparando...';
+  const cardC = document.getElementById('btnFoto'), cardG = document.getElementById('btnGaleria');
+  const lbl = document.getElementById(input.id==='inputFotoCamera' ? 'lblCamera' : 'lblGaleria');
+  const rotulo = lbl.textContent;
+  const msg = t=>{ lbl.textContent = t; };
+  cardC.classList.add('ocupado'); cardG.classList.add('ocupado'); msg('⏳ Preparando...');
   let worker = null;
   try{
-    btn.textContent = '⏳ Baixando leitor...';
+    msg('⏳ Baixando leitor...');
     await carregarTesseract();
     const canvas = await prepararFoto(file);
     worker = await Tesseract.createWorker('eng', 1, {
       workerPath: `${TESS_CDN}tesseract.js@${TESS_VER}/dist/worker.min.js`,
       corePath:   `${TESS_CDN}tesseract.js-core@${TESS_VER}`,
       langPath:   `${TESS_CDN}@tesseract.js-data/eng/4.0.0_best_int`,
-      logger: m=>{ if(m.status==='recognizing text') btn.textContent = `⏳ Lendo ${Math.round((m.progress||0)*100)}%`; }
+      logger: m=>{ if(m.status==='recognizing text') msg(`⏳ Lendo ${Math.round((m.progress||0)*100)}%`); }
     });
     try{ await worker.setParameters({ tessedit_pageseg_mode:'6', preserve_interword_spaces:'1' }); }catch(_){}
-    btn.textContent = '⏳ Lendo...';
+    msg('⏳ Lendo...');
     const { data } = await worker.recognize(canvas);
     const r = analisarComanda(data.text);
     if(!r.rua && r.taxa==null){ toast('⚠️ Não consegui ler a comanda. Tente outra foto, mais reta e com luz.'); return; }
@@ -1231,7 +1245,7 @@ async function lerComanda(input){
     toast(navigator.onLine ? '❌ Não consegui ler a foto' : '📡 Sem internet para baixar o leitor (só na 1ª vez)');
   }finally{
     if(worker){ try{ await worker.terminate(); }catch(_){} }
-    btn.disabled = false; btnG.disabled = false; btn.textContent = rotulo;
+    cardC.classList.remove('ocupado'); cardG.classList.remove('ocupado'); msg(rotulo);
   }
 }
 
